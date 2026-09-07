@@ -1,0 +1,6 @@
+{
+  "name": "WOW POS - Gym Management & Point of Sale System",
+  "description": "Production-ready, white-label Gym Management & Point of Sale (POS) system built with React, TypeScript, and MongoDB Atlas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
