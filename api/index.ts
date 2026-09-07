@@ -1,4 +1,5 @@
-import { app } from '../server';
+// Vercel Serverless Function entry point
+// Imports directly from the pure Express app (no Vite dependency)
+import { app } from '../src/server/app.ts';
 
-// Vercel Serverless Function export
 export default app;
