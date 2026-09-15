@@ -67,10 +67,17 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   });
 
   if (!response.ok) {
-    let errMsg = `Request failed: ${response.statusText}`;
+    let errMsg = ('Request failed: ' + response.status + ' ' + (response.statusText || '')).trim();
     try {
-      const errorJson = await response.json();
-      errMsg = errorJson.error || errorJson.message || errMsg;
+      const rawText = await response.text();
+      try {
+        const errorJson = JSON.parse(rawText);
+        errMsg = errorJson.error || errorJson.message || errMsg;
+      } catch {
+        if (rawText && rawText.length < 250 && !rawText.includes('<html') && !rawText.includes('<!DOCTYPE')) {
+          errMsg = rawText.trim();
+        }
+      }
     } catch (e) {}
 
     if (response.status === 401) {

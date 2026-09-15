@@ -4,16 +4,32 @@ import { sendSms } from '../lib/sms/smslen.ts';
 import { hashPassword, verifyPassword } from '../lib/security.ts';
 import bcrypt from 'bcryptjs';
 
-// Safe date helpers
+// Safe date helpers with year sanitization (handles year 2826 typo -> 2026)
+function sanitizeYear(year: number): number {
+  if (year === 2826 || (year >= 2800 && year <= 2899)) {
+    return year - 800; // Correct 2826 -> 2026
+  }
+  if (year > 2050 && year < 2900 && String(year).endsWith('26')) {
+    return 2026;
+  }
+  return year;
+}
+
 function formatDateStr(d: Date): string {
-  const year = d.getFullYear();
+  if (!d || isNaN(d.getTime())) d = new Date();
+  const year = sanitizeYear(d.getFullYear());
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
 function parseDateStr(str: string): Date {
-  const [y, m, d] = str.split('-').map(Number);
+  if (!str) return new Date();
+  const cleaned = String(str).replace(/^2826/, '2026');
+  const parts = cleaned.split(/[-/]/).map(Number);
+  const y = sanitizeYear(parts[0] || 2026);
+  const m = parts[1] || 1;
+  const d = parts[2] || 1;
   return new Date(y, m - 1, d, 12, 0, 0);
 }
 
@@ -1156,6 +1172,17 @@ export class GymService {
     return list.find((m) => m.id === id) || null;
   }
 
+  static async lookupMember(code: string, gymIdOrBusinessId: number | string): Promise<Member | null> {
+    const list = await this.getMembers(gymIdOrBusinessId);
+    const clean = String(code).trim().toLowerCase();
+    return list.find(
+      (m) =>
+        String(m.id) === clean ||
+        (m.barcode && m.barcode.toLowerCase() === clean) ||
+        (m.memberNumber && m.memberNumber.toLowerCase() === clean)
+    ) || null;
+  }
+
   static async createMember(data: {
     gymId?: number;
     businessId?: string;
@@ -1185,6 +1212,25 @@ export class GymService {
     const nextNumber = 1001 + count;
     const memberNumber = data.memberNumber?.trim() || `M-${nextNumber}`;
     const barcode = memberNumber;
+
+    // Check for duplicate member number in this gym tenant
+    const cleanNum = memberNumber.trim();
+    if (db) {
+      const existing = await db.collection('members').findOne({
+        businessId,
+        memberNumber: cleanNum,
+      });
+      if (existing) {
+        throw new Error('Member number "' + cleanNum + '" is already registered. Please choose a different member number.');
+      }
+    } else {
+      const existing = mem.members.find(
+        (m) => m.businessId === businessId && m.memberNumber.toLowerCase() === cleanNum.toLowerCase()
+      );
+      if (existing) {
+        throw new Error('Member number "' + cleanNum + '" is already registered. Please choose a different member number.');
+      }
+    }
 
     // Calculate Expiry Date based on Package
     const start = parseDateStr(data.startDate);
@@ -1263,7 +1309,25 @@ export class GymService {
       }
     }
 
-    return newMemberDoc;
+    // Dispatch Welcome & Payment SMS notification via SMSLEN Gateway (non-blocking)
+    try {
+      const gymDetails = await this.getGymDetails(businessId);
+      const gymName = gymDetails?.gymName || 'ZENERGY FITNESS';
+      const cleanPkg = data.package.replace(/_/g, ' ').toUpperCase();
+      const welcomeMsg = 'Welcome to ' + gymName + ', ' + data.fullName + '! Your ' + cleanPkg + ' membership is active until ' + expiryDate + '. Payment received: Rs. ' + data.paymentAmount.toLocaleString() + '. Member ID: ' + memberNumber + '.';
+      await sendSms({
+        gymId,
+        memberId,
+        phone: data.phone,
+        messageType: 'activation',
+        message: welcomeMsg,
+      });
+    } catch (smsErr: any) {
+      console.warn('Non-blocking welcome SMS dispatch notice:', smsErr?.message || smsErr);
+    }
+
+    const fullMember = await this.getMemberById(memberId, businessId);
+    return fullMember || newMemberDoc;
   }
 
   static async updateMember(
@@ -1443,6 +1507,23 @@ export class GymService {
       if (mIdx !== -1) {
         mem.members[mIdx].status = 'active';
       }
+    }
+
+    // Dispatch Renewal Confirmation SMS notification (non-blocking)
+    try {
+      const gymDetails = await this.getGymDetails(businessId);
+      const gymName = gymDetails?.gymName || 'ZENERGY FITNESS';
+      const cleanPkg = data.package.replace(/_/g, ' ').toUpperCase();
+      const renewMsg = 'Payment Received: Rs. ' + data.paymentAmount.toLocaleString() + ' for ' + member.fullName + '. Your ' + cleanPkg + ' membership at ' + gymName + ' is renewed until ' + expiryDate + '.';
+      await sendSms({
+        gymId,
+        memberId: data.memberId,
+        phone: member.phone,
+        messageType: 'payment',
+        message: renewMsg,
+      });
+    } catch (smsErr: any) {
+      console.warn('Non-blocking renewal SMS dispatch notice:', smsErr?.message || smsErr);
     }
 
     return { membership: membershipDoc, payment: paymentDoc };

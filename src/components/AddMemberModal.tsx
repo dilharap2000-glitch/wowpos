@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, UserPlus, Calendar, CreditCard, Phone, User, FileText, CheckCircle2 } from 'lucide-react';
-import { getColomboToday, calculateExpiryDate } from '../lib/date-utils.ts';
+import { getColomboToday, calculateExpiryDate, sanitizeDateString } from '../lib/date-utils.ts';
 import { api } from '../lib/api.ts';
 
 interface AddMemberModalProps {
@@ -255,8 +255,10 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
                 <input
                   type="date"
                   required
+                  min="2020-01-01"
+                  max="2035-12-31"
                   value={paymentDate}
-                  onChange={(e) => setPaymentDate(e.target.value)}
+                  onChange={(e) => setPaymentDate(sanitizeDateString(e.target.value))}
                   className="w-full bg-black/40 border border-white/10 rounded-2xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-[#FACC15] focus:outline-hidden"
                 />
               </div>

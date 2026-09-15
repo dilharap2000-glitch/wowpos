@@ -10,15 +10,50 @@ export interface TodayInfo {
   time: string; // hh:mm A
 }
 
+/**
+ * Sanitize and correct date strings:
+ * Catches accidental year typing such as 2826 (when typing 2026),
+ * years beyond sensible boundaries (e.g. 2800-2899), or malformed inputs.
+ */
+export function sanitizeDateString(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  let str = String(dateStr).trim();
+  if (str.startsWith('2826')) {
+    str = str.replace(/^2826/, '2026');
+  }
+  const parts = str.split(/[-/]/);
+  if (parts.length === 3) {
+    let y = Number(parts[0]);
+    if (y === 2826 || (y >= 2800 && y <= 2899)) {
+      y -= 800; // 2826 -> 2026
+    } else if (y > 2050 && y < 2900 && String(y).endsWith('26')) {
+      y = 2026;
+    }
+    const m = String(parts[1]).padStart(2, '0');
+    const d = String(parts[2]).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return str;
+}
+
 export function getColomboToday(): string {
-  // Return YYYY-MM-DD in Asia/Colombo timezone
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: COLOMBO_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  return formatter.format(new Date());
+  try {
+    // Return YYYY-MM-DD in Asia/Colombo timezone
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: COLOMBO_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return sanitizeDateString(formatter.format(new Date()));
+  } catch (e) {
+    const d = new Date();
+    let year = d.getFullYear();
+    if (year === 2826 || (year >= 2800 && year <= 2899)) year -= 800;
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 }
 
 export function getColomboCurrentTime(): string {
@@ -47,8 +82,16 @@ export function getColomboTodayInfo(): TodayInfo {
  * - Annual: Start Date + 12 calendar months
  */
 export function calculateExpiryDate(startDateStr: string, packageType: string): string {
-  const [year, month, day] = startDateStr.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
+  if (!startDateStr) return '';
+  const sanitized = sanitizeDateString(startDateStr);
+  const parts = sanitized.split('-').map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return '';
+
+  let [year, month, day] = parts;
+  if (year === 2826 || (year >= 2800 && year <= 2899)) {
+    year -= 800;
+  }
+  const date = new Date(year, month - 1, day, 12, 0, 0);
 
   switch (packageType) {
     case 'monthly':
@@ -67,7 +110,10 @@ export function calculateExpiryDate(startDateStr: string, packageType: string): 
       date.setDate(date.getDate() + 30);
   }
 
-  const y = date.getFullYear();
+  let y = date.getFullYear();
+  if (y === 2826 || (y >= 2800 && y <= 2899)) {
+    y -= 800;
+  }
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
@@ -78,12 +124,14 @@ export function calculateExpiryDate(startDateStr: string, packageType: string): 
  * Returns negative if already expired.
  */
 export function getDaysRemaining(expiryDateStr: string, todayStr?: string): number {
-  const today = todayStr || getColomboToday();
-  const [y1, m1, d1] = today.split('-').map(Number);
-  const [y2, m2, d2] = expiryDateStr.split('-').map(Number);
+  const today = sanitizeDateString(todayStr || getColomboToday());
+  const expiry = sanitizeDateString(expiryDateStr);
 
-  const tDate = new Date(y1, m1 - 1, d1).getTime();
-  const eDate = new Date(y2, m2 - 1, d2).getTime();
+  const [y1, m1, d1] = today.split('-').map(Number);
+  const [y2, m2, d2] = expiry.split('-').map(Number);
+
+  const tDate = new Date(y1, m1 - 1, d1, 12, 0, 0).getTime();
+  const eDate = new Date(y2, m2 - 1, d2, 12, 0, 0).getTime();
 
   const diffMs = eDate - tDate;
   return Math.round(diffMs / (1000 * 60 * 60 * 24));

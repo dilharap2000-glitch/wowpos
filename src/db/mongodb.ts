@@ -4,8 +4,13 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
-const MONGODB_URI = process.env.MONGODB_URI || '';
-const DB_NAME = process.env.MONGODB_DB_NAME || 'gym_pos_db';
+export function getMongoUri(): string {
+  return process.env.MONGODB_URI || '';
+}
+
+export function getMongoDbName(): string {
+  return process.env.MONGODB_DB_NAME || 'gym_pos_db';
+}
 
 let cachedDb: Db | null = null;
 
@@ -13,7 +18,8 @@ let cachedDb: Db | null = null;
  * Connect to MongoDB with caching for serverless environments (Vercel)
  */
 export async function getMongoDb(): Promise<Db | null> {
-  if (!MONGODB_URI) {
+  const uri = getMongoUri();
+  if (!uri) {
     return null;
   }
 
@@ -23,7 +29,7 @@ export async function getMongoDb(): Promise<Db | null> {
 
   try {
     if (!global._mongoClientPromise) {
-      const client = new MongoClient(MONGODB_URI, {
+      const client = new MongoClient(uri, {
         maxPoolSize: 10,
         serverSelectionTimeoutMS: 5000,
       });
@@ -31,12 +37,55 @@ export async function getMongoDb(): Promise<Db | null> {
     }
 
     const client = await global._mongoClientPromise;
-    const db = client.db(DB_NAME);
+    const db = client.db(getMongoDbName());
     cachedDb = db;
     return db;
   } catch (error) {
     console.error('Failed to connect to MongoDB Atlas:', error);
     return null;
+  }
+}
+
+/**
+ * Actively checks MongoDB connectivity and returns detailed health info
+ */
+export async function checkMongoHealth(): Promise<{
+  connected: boolean;
+  type: 'mongodb_atlas' | 'memory_fallback';
+  database?: string;
+  error?: string;
+}> {
+  const uri = getMongoUri();
+  if (!uri) {
+    return {
+      connected: false,
+      type: 'memory_fallback',
+      error: 'MONGODB_URI not configured, running on in-memory storage fallback',
+    };
+  }
+
+  try {
+    const db = await getMongoDb();
+    if (!db) {
+      return {
+        connected: false,
+        type: 'mongodb_atlas',
+        error: 'Unable to establish MongoDB connection pool',
+      };
+    }
+    // Ping the active database
+    await db.command({ ping: 1 });
+    return {
+      connected: true,
+      type: 'mongodb_atlas',
+      database: db.databaseName,
+    };
+  } catch (err: any) {
+    return {
+      connected: false,
+      type: 'mongodb_atlas',
+      error: err.message || 'Database ping command failed',
+    };
   }
 }
 
