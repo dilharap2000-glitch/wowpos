@@ -23,7 +23,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (process.env.VERCEL) {
     const matchedPath = (req.headers['x-matched-path'] || req.headers['x-vercel-matched-path']) as string;
-    if (matchedPath && (req.url === '/api/index.ts' || req.url === '/api' || req.url === '/api/' || req.url === '/')) {
+    if (matchedPath && (req.url === '/api/index.js' || req.url === '/api/index.ts' || req.url === '/api' || req.url === '/api/' || req.url === '/')) {
       req.url = matchedPath;
     }
 
