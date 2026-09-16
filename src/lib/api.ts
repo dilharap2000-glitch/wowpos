@@ -7,7 +7,7 @@ const USER_KEY = 'gym_auth_user';
 const TARGET_GYM_KEY = 'gym_target_id';
 
 export function getAuthToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY) || 'gym_admin_secret_session_active';
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 export function getTargetGymId(): number | null {
@@ -95,10 +95,23 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   // Auth
-  login: (credentials: { username?: string; password?: string; passkey?: string }) =>
+  login: (credentials: { username?: string; email?: string; password?: string; passkey?: string }) =>
     request<{ success: boolean; token: string; user: any }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
+    }),
+
+  register: (data: {
+    gymName: string;
+    ownerName: string;
+    email: string;
+    phone: string;
+    password: string;
+    confirmPassword: string;
+  }) =>
+    request<{ success: boolean; token: string; user: any; message?: string }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 
   getCurrentUser: () => request<{ user: any }>('/api/auth/me'),

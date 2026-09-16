@@ -2638,6 +2638,109 @@ export class GymService {
     };
   }
 
+  static async registerGymOwner(data: {
+    gymName: string;
+    ownerName: string;
+    email: string;
+    phone: string;
+    password: string;
+  }) {
+    await ensureMongoSeeded();
+    const db = await getMongoDb();
+
+    const cleanGymName = data.gymName.trim();
+    const cleanOwnerName = data.ownerName.trim();
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanPhone = data.phone.trim();
+
+    // Check if email already registered
+    const existingUser = await this.findUserByEmail(cleanEmail);
+    if (existingUser) {
+      throw new Error('An account with this email address already exists. Please log in.');
+    }
+
+    const gymId = Date.now();
+    const businessId = `biz_${gymId}`;
+
+    // Generate unique username from email
+    const baseUsername = cleanEmail.split('@')[0].replace(/[^a-z0-9_]/gi, '').toLowerCase() || 'owner';
+    let candidateUsername = baseUsername;
+    let counter = 1;
+    while (await this.findUserByUsername(candidateUsername)) {
+      candidateUsername = `${baseUsername}${counter++}`;
+    }
+
+    const hashedPassword = hashPassword(data.password);
+    const uid = `owner_${gymId}`;
+
+    const newGym: any = {
+      id: gymId,
+      businessId,
+      gymName: cleanGymName,
+      phone: cleanPhone,
+      email: cleanEmail,
+      currency: 'Rs.',
+      status: 'active',
+      monthlyPrice: 4500,
+      threeMonthsPrice: 12000,
+      sixMonthsPrice: 22000,
+      annualPrice: 38000,
+      smsSenderId: 'GYMFIT',
+      receiptFooter: `Thank you for training with ${cleanGymName}! Powered by WOW POS.`,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const newOwner: any = {
+      id: gymId + 1,
+      uid,
+      businessId,
+      gymId,
+      username: candidateUsername,
+      password: hashedPassword,
+      email: cleanEmail,
+      name: cleanOwnerName,
+      phone: cleanPhone,
+      role: 'GYM_OWNER',
+      status: 'active',
+      createdAt: new Date(),
+    };
+
+    const defaultSettings = [
+      { businessId, gymId, key: 'gym_name', value: cleanGymName },
+      { businessId, gymId, key: 'currency', value: 'Rs.' },
+      { businessId, gymId, key: 'phone', value: cleanPhone },
+      { businessId, gymId, key: 'email', value: cleanEmail },
+      { businessId, gymId, key: 'receipt_footer', value: `Thank you for training with ${cleanGymName}! Powered by WOW POS.` },
+    ];
+
+    if (db) {
+      await db.collection('businesses').insertOne(newGym);
+      await db.collection('users').insertOne(newOwner);
+      await db.collection('settings').insertMany(defaultSettings);
+    } else {
+      mem.businesses.push(newGym);
+      mem.users.push(newOwner);
+      mem.settings.push(...defaultSettings);
+    }
+
+    return {
+      gym: newGym,
+      owner: {
+        id: newOwner.id,
+        uid: newOwner.uid,
+        username: newOwner.username,
+        email: newOwner.email,
+        name: newOwner.name,
+        role: newOwner.role,
+        businessId: newOwner.businessId,
+        gymId: newOwner.gymId,
+        gymName: newGym.gymName,
+        status: newOwner.status,
+      },
+    };
+  }
+
   static async toggleGymStatus(gymId: number, status: 'active' | 'inactive') {
     await ensureMongoSeeded();
     const db = await getMongoDb();

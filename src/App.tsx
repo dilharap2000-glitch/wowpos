@@ -25,19 +25,15 @@ export default function App() {
 
   // Authentication State
   const [user, setUser] = useState<UserSession | null>(() => {
-    return getStoredUser() || {
-      uid: 'gym_admin_reception',
-      email: 'admin@gymmanagement.local',
-      name: 'Gym Administrator',
-      role: 'GYM_OWNER',
-      gymId: 1,
-      gymName: 'Gym Management',
-    };
+    return getStoredUser();
   });
 
   // Active Scoped Gym Name
-  const [activeGymName, setActiveGymName] = useState<string>('');
-  const displayGymName = activeGymName || business.gymName || 'Gym Management';
+  const [activeGymName, setActiveGymName] = useState<string>(() => {
+    const stored = getStoredUser();
+    return stored?.gymName || '';
+  });
+  const displayGymName = activeGymName || user?.gymName || business.gymName || 'Gym Management';
 
   // Navigation State
   const [currentSection, setCurrentSection] = useState<NavSection>(() => {
