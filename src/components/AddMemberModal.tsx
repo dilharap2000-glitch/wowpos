@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, UserPlus, Calendar, CreditCard, Phone, User, FileText, CheckCircle2 } from 'lucide-react';
 import { getColomboToday, calculateExpiryDate, sanitizeDateString } from '../lib/date-utils.ts';
 import { api } from '../lib/api.ts';
+import { useBusiness } from '../context/BusinessContext.tsx';
 
 interface AddMemberModalProps {
   isOpen: boolean;
@@ -9,24 +10,26 @@ interface AddMemberModalProps {
   onMemberAdded: (member: any) => void;
 }
 
-const PACKAGE_PRICES: Record<string, number> = {
-  monthly: 5000,
-  '3_months': 13500,
-  '6_months': 24000,
-  annual: 42000,
-};
-
 export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   isOpen,
   onClose,
   onMemberAdded,
 }) => {
+  const { business, refreshBusiness } = useBusiness();
+
+  const packagePrices = useMemo<Record<'monthly' | '3_months' | '6_months' | 'annual', number>>(() => ({
+    monthly: Number(business.monthlyPrice) || 0,
+    '3_months': Number(business.threeMonthsPrice) || 0,
+    '6_months': Number(business.sixMonthsPrice) || 0,
+    annual: Number(business.annualPrice) || 0,
+  }), [business.monthlyPrice, business.threeMonthsPrice, business.sixMonthsPrice, business.annualPrice]);
+
   const [memberNumber, setMemberNumber] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [membershipPackage, setMembershipPackage] = useState<'monthly' | '3_months' | '6_months' | 'annual'>('monthly');
   const [paymentDate, setPaymentDate] = useState(getColomboToday());
-  const [paymentAmount, setPaymentAmount] = useState(5000);
+  const [paymentAmount, setPaymentAmount] = useState(packagePrices.monthly);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer'>('cash');
   const [emergencyContact, setEmergencyContact] = useState('');
   const [notes, setNotes] = useState('');
@@ -38,14 +41,21 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      refreshBusiness();
       setPaymentDate(getColomboToday());
       setError(null);
     }
-  }, [isOpen]);
+  }, [isOpen, refreshBusiness]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setPaymentAmount(packagePrices[membershipPackage]);
+    }
+  }, [isOpen, packagePrices, membershipPackage]);
 
   const handlePackageChange = (pkg: 'monthly' | '3_months' | '6_months' | 'annual') => {
     setMembershipPackage(pkg);
-    setPaymentAmount(PACKAGE_PRICES[pkg] || 5000);
+    setPaymentAmount(packagePrices[pkg]);
   };
 
   if (!isOpen) return null;

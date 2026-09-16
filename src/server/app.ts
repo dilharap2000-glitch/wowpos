@@ -65,46 +65,15 @@ app.get('/api/health', async (req: Request, res: Response) => {
 // AUTHENTICATION & LOGIN
 // ============================================================
 app.post('/api/auth/login', async (req: Request, res: Response) => {
-  const { username, email, password, passkey, isDemo } = req.body;
+  const { username, email, password } = req.body;
 
   try {
-    // 1. Direct passkey fallback for quick reception access
-    if (passkey === 'gym_admin_secret_session_active' || passkey === 'reception_quick_access' || isDemo) {
-      const defaultOwner = await GymService.findUserByUsername('admin');
-      const gymRecord = await GymService.getGymDetails(defaultOwner?.businessId || defaultOwner?.gymId || 1);
-
-      const token = generateToken({
-        uid: defaultOwner ? defaultOwner.uid : 'gym_admin_reception',
-        id: defaultOwner ? defaultOwner.id : 2,
-        role: 'GYM_OWNER',
-        businessId: defaultOwner?.businessId || 'biz_1',
-        gymId: defaultOwner?.gymId || 1,
-      });
-
-      return res.json({
-        success: true,
-        token,
-        user: {
-          id: defaultOwner ? defaultOwner.id : 2,
-          uid: defaultOwner ? defaultOwner.uid : 'gym_admin_reception',
-          username: defaultOwner?.username || 'admin',
-          email: defaultOwner?.email || 'contact@zenergyfitness.com',
-          name: defaultOwner?.name || 'Gym Administrator',
-          role: 'GYM_OWNER',
-          businessId: defaultOwner?.businessId || 'biz_1',
-          gymId: defaultOwner?.gymId || 1,
-          gymName: gymRecord?.gymName || 'ZENERGY FITNESS',
-          status: defaultOwner?.status || 'active',
-        },
-      });
-    }
-
     const rawIdentifier = String(email || username || '').trim().toLowerCase();
     if (!rawIdentifier || !password) {
       return res.status(400).json({ error: 'Email or Username and password are required' });
     }
 
-    // 2. Query user by email first, then by username
+    // 1. Query user by email first, then by username
     let user = await GymService.findUserByEmail(rawIdentifier);
     if (!user) {
       user = await GymService.findUserByUsername(rawIdentifier);
@@ -114,14 +83,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid email/username or password' });
     }
 
-    // Verify password securely using PBKDF2 hash or verified demo match
-    const isPasswordValid =
-      verifyPassword(password, user.password) ||
-      (rawIdentifier === 'superadmin' && password === 'admin123') ||
-      (rawIdentifier === 'titan' && password === 'admin123') ||
-      (rawIdentifier === 'admin' && (password === 'admin123' || password === 'gymfit2026')) ||
-      (rawIdentifier === 'staff' && (password === 'admin123' || password === 'staff123')) ||
-      (rawIdentifier === 'reception' && (password === 'admin123' || password === 'reception123'));
+    // 2. Verify password securely using PBKDF2 hash
+    const isPasswordValid = verifyPassword(password, user.password);
 
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid email/username or password' });
