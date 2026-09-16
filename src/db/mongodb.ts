@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection, Document } from 'mongodb';
+import { MongoClient, type Db } from 'mongodb';
 
 declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;

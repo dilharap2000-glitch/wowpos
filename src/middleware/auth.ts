@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { GymService, resolveBusinessId, resolveGymId } from '../db/gym-service-mongo.ts';
 import type { UserRole } from '../types.ts';
 import jwt from 'jsonwebtoken';

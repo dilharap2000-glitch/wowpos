@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import * as dotenv from 'dotenv';
 import { GymService, resolveBusinessId, resolveGymId, ensureMongoSeeded } from '../db/gym-service-mongo.ts';
 import { checkMongoHealth } from '../db/mongodb.ts';
@@ -8,7 +8,7 @@ import {
   requireGymTenant,
   requireSuperAdmin,
   requireRoles,
-  AuthRequest,
+  type AuthRequest,
   generateToken,
 } from '../middleware/auth.ts';
 import { verifyPassword, hashPassword } from '../lib/security.ts';
@@ -21,13 +21,15 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Vercel Serverless routing normalization
 app.use((req: Request, res: Response, next: NextFunction) => {
-  const matchedPath = (req.headers['x-matched-path'] || req.headers['x-vercel-matched-path']) as string;
-  if (matchedPath && (req.url === '/api/index.ts' || req.url === '/api' || req.url === '/api/' || req.url === '/')) {
-    req.url = matchedPath;
-  }
+  if (process.env.VERCEL) {
+    const matchedPath = (req.headers['x-matched-path'] || req.headers['x-vercel-matched-path']) as string;
+    if (matchedPath && (req.url === '/api/index.ts' || req.url === '/api' || req.url === '/api/' || req.url === '/')) {
+      req.url = matchedPath;
+    }
 
-  if (req.url && !req.url.startsWith('/api') && req.url !== '/' && !req.url.startsWith('/index.html')) {
-    req.url = '/api' + req.url;
+    if (req.url && !req.url.startsWith('/api') && req.url !== '/' && !req.url.startsWith('/index.html')) {
+      req.url = '/api' + req.url;
+    }
   }
   next();
 });
