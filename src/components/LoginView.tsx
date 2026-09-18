@@ -108,6 +108,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
       if (res.success && res.token) {
         setSuccessMessage('Gym account registered successfully! Loading workspace...');
+        // Clear sensitive inputs
+        setSignUpPassword('');
+        setSignUpConfirmPassword('');
+        setIdentifier(signUpEmail.trim().toLowerCase());
+        setLoginPassword('');
         setAuthSession(res.token, res.user);
         if (res.user.gymId) {
           setTargetGymId(res.user.gymId);
