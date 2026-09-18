@@ -1,4 +1,5 @@
-﻿import path from 'path';
+import 'dotenv/config';
+import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import express from 'express';
 import { app } from './src/server/app.ts';

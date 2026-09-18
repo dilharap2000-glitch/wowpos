@@ -3,7 +3,9 @@ import { GymService, resolveBusinessId, resolveGymId } from '../db/gym-service-m
 import type { UserRole } from '../types.ts';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.AUTH_SECRET || process.env.JWT_SECRET || 'gym_saas_secure_jwt_secret_key_2026';
+export function getJwtSecret(): string {
+  return process.env.AUTH_SECRET || process.env.JWT_SECRET || 'gym_saas_secure_jwt_secret_key_2026';
+}
 
 export interface AuthUser {
   id: number;
@@ -26,6 +28,7 @@ export interface AuthRequest extends Request {
 }
 
 export function generateToken(user: { uid: string; id: number; role: string; gymId?: number | null; businessId?: string }): string {
+  const secret = getJwtSecret();
   const payload = {
     uid: user.uid,
     id: user.id,
@@ -36,7 +39,7 @@ export function generateToken(user: { uid: string; id: number; role: string; gym
   };
 
   try {
-    return jwt.sign(payload, JWT_SECRET);
+    return jwt.sign(payload, secret);
   } catch (e) {
     return `gym_token_${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
   }
@@ -45,7 +48,8 @@ export function generateToken(user: { uid: string; id: number; role: string; gym
 export function parseToken(tokenStr: string): { uid: string; id: number; role: UserRole; businessId?: string; gymId?: number | null } | null {
   try {
     // 1. Try JWT verification first
-    const decoded = jwt.verify(tokenStr, JWT_SECRET) as any;
+    const secret = getJwtSecret();
+    const decoded = jwt.verify(tokenStr, secret) as any;
     if (decoded && decoded.uid) {
       return {
         uid: decoded.uid,

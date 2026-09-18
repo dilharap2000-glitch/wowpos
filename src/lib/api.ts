@@ -5,6 +5,11 @@
 const TOKEN_KEY = 'gym_auth_token';
 const USER_KEY = 'gym_auth_user';
 const TARGET_GYM_KEY = 'gym_target_id';
+const CACHED_BIZ_KEY = 'gym_cached_business_profile';
+
+export interface RequestOptions extends RequestInit {
+  skipAuthExpired?: boolean;
+}
 
 export function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -26,12 +31,16 @@ export function setTargetGymId(id: number | null) {
 export function setAuthSession(token: string, user: any) {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  if (user?.gymId) {
+    localStorage.setItem(TARGET_GYM_KEY, String(user.gymId));
+  }
 }
 
 export function clearAuthSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(TARGET_GYM_KEY);
+  localStorage.removeItem(CACHED_BIZ_KEY);
 }
 
 export function getStoredUser() {
@@ -43,7 +52,7 @@ export function getStoredUser() {
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const token = getAuthToken();
   const targetGymId = getTargetGymId();
   const headers = new Headers(options.headers || {});
@@ -80,10 +89,19 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       }
     } catch (e) {}
 
-    if (response.status === 401) {
-      // Clear expired or invalid session token so user can re-authenticate
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
+    // Only trigger full logout if a protected request explicitly failed with 401
+    // and the request was actually made with the CURRENT session token.
+    // Never auto-logout during login/register attempts or for soft background calls.
+    const isAuthEndpoint = endpoint.startsWith('/api/auth/login') || endpoint.startsWith('/api/auth/register');
+    if (
+      response.status === 401 &&
+      token &&
+      token === getAuthToken() &&
+      !options.skipAuthExpired &&
+      !isAuthEndpoint
+    ) {
+      console.warn(`[AUTH] Session expired or invalid on ${endpoint}. Logging out.`);
+      clearAuthSession();
       window.dispatchEvent(new CustomEvent('gym_auth_expired'));
     }
 
@@ -99,6 +117,7 @@ export const api = {
     request<{ success: boolean; token: string; user: any }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
+      skipAuthExpired: true,
     }),
 
   register: (data: {
@@ -112,6 +131,7 @@ export const api = {
     request<{ success: boolean; token: string; user: any; message?: string }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
+      skipAuthExpired: true,
     }),
 
   getCurrentUser: () => request<{ user: any }>('/api/auth/me'),
@@ -264,7 +284,7 @@ export const api = {
     }),
 
   // Settings & White-Label Business Config
-  getSettings: () => request<Record<string, string>>('/api/settings'),
+  getSettings: () => request<Record<string, string>>('/api/settings', { skipAuthExpired: true }),
 
   getPublicGymInfo: () =>
     request<{
@@ -276,7 +296,7 @@ export const api = {
       currency: string;
       description: string | null;
       receiptFooter: string | null;
-    }>('/api/business/public'),
+    }>('/api/business/public', { skipAuthExpired: true }),
 
   updateSettings: (settingsMap: Record<string, string>) =>
     request<any>('/api/settings', {

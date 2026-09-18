@@ -113,9 +113,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           setTargetGymId(res.user.gymId);
         }
         await refreshBusiness();
-        setTimeout(() => {
-          onLoginSuccess(res.user);
-        }, 400);
+        onLoginSuccess(res.user);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to create gym account. Please try again.');

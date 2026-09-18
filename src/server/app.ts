@@ -261,13 +261,14 @@ app.get('/api/businesses', async (req: Request, res: Response) => {
 // Public Business / White-label profile
 app.get('/api/business/public', async (req: Request, res: Response) => {
   try {
-    const targetGymId = Number(req.headers['x-target-gym-id']) || 1;
+    const rawTarget = (req.headers['x-target-gym-id'] as string) || (req.query.gymId as string);
+    const targetGymId = rawTarget ? Number(rawTarget) : 1;
     const businessId = resolveBusinessId(targetGymId);
     const gymDetails = await GymService.getGymDetails(businessId);
     const settingsMap = await GymService.getSettings(businessId);
 
     res.json({
-      gymName: gymDetails?.gymName || settingsMap['gym_name'] || 'ZENERGY FITNESS',
+      gymName: gymDetails?.gymName || settingsMap['gym_name'] || 'Gym Management',
       logo: gymDetails?.logo || settingsMap['logo'] || null,
       phone: gymDetails?.phone || settingsMap['phone'] || settingsMap['gym_phone'] || null,
       address: gymDetails?.address || settingsMap['address'] || settingsMap['gym_address'] || null,

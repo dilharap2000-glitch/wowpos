@@ -11,14 +11,14 @@ interface BusinessContextType {
 }
 
 const defaultBusiness: BusinessSettings = {
-  gymName: 'ZENERGY FITNESS',
+  gymName: 'Gym Management',
   logo: null,
-  phone: '+94 77 111 2233',
-  address: 'No. 12 Beach Road, Colombo 03',
-  email: 'contact@zenergyfitness.com',
+  phone: '',
+  address: '',
+  email: '',
   currency: 'Rs.',
-  description: 'High-Energy Functional Fitness, Strength & Conditioning',
-  receiptFooter: 'Thank you for training with ZENERGY FITNESS! Goods sold are exchangeable within 7 days.',
+  description: 'Fitness, Strength & Conditioning',
+  receiptFooter: 'Thank you for training with us!',
   monthlyPrice: 4500,
   threeMonthsPrice: 12000,
   sixMonthsPrice: 22000,
@@ -78,14 +78,21 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   const refreshBusiness = useCallback(async () => {
     setLoading(true);
     try {
-      // First attempt authenticated settings
-      const settingsMap = await api.getSettings();
-      if (settingsMap && (settingsMap.gym_name || settingsMap.currency)) {
-        applyBusinessData(settingsMap);
-        return;
+      const token = localStorage.getItem('gym_auth_token');
+      // If authenticated, fetch the current tenant's active settings
+      if (token) {
+        try {
+          const settingsMap = await api.getSettings();
+          if (settingsMap && (settingsMap.gym_name || settingsMap.currency)) {
+            applyBusinessData(settingsMap);
+            return;
+          }
+        } catch (authErr) {
+          // Soft fallback to public endpoint if needed
+        }
       }
-    } catch (err) {
-      // If unauthenticated or token expired, attempt public business endpoint
+
+      // If unauthenticated or no custom settings yet, fetch public business info
       try {
         const publicInfo = await api.getPublicGymInfo();
         if (publicInfo && publicInfo.gymName) {

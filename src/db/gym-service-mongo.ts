@@ -1312,7 +1312,7 @@ export class GymService {
     // Dispatch Welcome & Payment SMS notification via SMSLEN Gateway (non-blocking)
     try {
       const gymDetails = await this.getGymDetails(businessId);
-      const gymName = gymDetails?.gymName || 'ZENERGY FITNESS';
+      const gymName = gymDetails?.gymName || 'Gym Management';
       const cleanPkg = data.package.replace(/_/g, ' ').toUpperCase();
       const welcomeMsg = 'Welcome to ' + gymName + ', ' + data.fullName + '! Your ' + cleanPkg + ' membership is active until ' + expiryDate + '. Payment received: Rs. ' + data.paymentAmount.toLocaleString() + '. Member ID: ' + memberNumber + '.';
       await sendSms({
@@ -1512,7 +1512,7 @@ export class GymService {
     // Dispatch Renewal Confirmation SMS notification (non-blocking)
     try {
       const gymDetails = await this.getGymDetails(businessId);
-      const gymName = gymDetails?.gymName || 'ZENERGY FITNESS';
+      const gymName = gymDetails?.gymName || 'Gym Management';
       const cleanPkg = data.package.replace(/_/g, ' ').toUpperCase();
       const renewMsg = 'Payment Received: Rs. ' + data.paymentAmount.toLocaleString() + ' for ' + member.fullName + '. Your ' + cleanPkg + ' membership at ' + gymName + ' is renewed until ' + expiryDate + '.';
       await sendSms({
@@ -2417,19 +2417,26 @@ export class GymService {
   static async findUserByUsername(username: string, businessId?: string) {
     await ensureMongoSeeded();
     const db = await getMongoDb();
-    const cleanUsername = username.trim().toLowerCase();
+    const cleanUsername = (username || '').trim();
+    if (!cleanUsername) return null;
+    const escaped = cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const caseInsensitiveRegex = new RegExp(`^${escaped}$`, 'i');
 
     if (db) {
       const q: any = {
-        $or: [{ username: cleanUsername }, { email: cleanUsername }],
+        $or: [
+          { username: { $regex: caseInsensitiveRegex } },
+          { email: { $regex: caseInsensitiveRegex } },
+        ],
       };
       if (businessId) q.businessId = businessId;
       return db.collection('users').findOne(q);
     }
 
+    const lower = cleanUsername.toLowerCase();
     return mem.users.find(
       (u) =>
-        (u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanUsername) &&
+        (u.username?.toLowerCase() === lower || u.email?.toLowerCase() === lower) &&
         (!businessId || u.businessId === businessId)
     );
   }
@@ -2437,17 +2444,21 @@ export class GymService {
   static async findUserByEmail(email: string, businessId?: string) {
     await ensureMongoSeeded();
     const db = await getMongoDb();
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = (email || '').trim();
+    if (!cleanEmail) return null;
+    const escaped = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const caseInsensitiveRegex = new RegExp(`^${escaped}$`, 'i');
 
     if (db) {
-      const q: any = { email: cleanEmail };
+      const q: any = { email: { $regex: caseInsensitiveRegex } };
       if (businessId) q.businessId = businessId;
       return db.collection('users').findOne(q);
     }
 
+    const lower = cleanEmail.toLowerCase();
     return mem.users.find(
       (u) =>
-        u.email.toLowerCase() === cleanEmail &&
+        u.email?.toLowerCase() === lower &&
         (!businessId || u.businessId === businessId)
     );
   }
