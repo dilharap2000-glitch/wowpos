@@ -1,4 +1,4 @@
-import { getMongoDb, setupMongoIndexes } from './mongodb.ts';
+import { getMongoDb, setupMongoIndexes, getMongoUri } from './mongodb.ts';
 import type { Member, DashboardStats, Product, Sale, SaleItem, Gym, BusinessSettings, UserAccount, SuperAdminDashboardData } from '../types.ts';
 import { sendSms } from '../lib/sms/smslen.ts';
 import { hashPassword, verifyPassword } from '../lib/security.ts';
@@ -2636,6 +2636,9 @@ export class GymService {
       if (db) {
         await db.collection('users').insertOne(createdOwner);
       } else {
+        if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+          throw new Error('Database connection is required in production to create gym owner');
+        }
         mem.users.push(createdOwner);
       }
     }
@@ -2730,14 +2733,21 @@ export class GymService {
       { businessId, gymId, key: 'receipt_footer', value: `Thank you for training with ${cleanGymName}! Powered by WOW POS.` },
     ];
 
+    const uri = getMongoUri();
+    if (!db && uri) {
+      throw new Error(
+        'Database connection unavailable. Cannot create gym account in offline memory mode when database is configured. Please check MongoDB Atlas connection.'
+      );
+    }
+
     if (db) {
       await db.collection('businesses').insertOne(newGym);
       await db.collection('users').insertOne(newOwner);
       await db.collection('settings').insertMany(defaultSettings);
     } else {
       if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
-        console.warn(
-          '[AUTH REGISTER WARNING] MongoDB Atlas is NOT connected. User is being saved to ephemeral in-memory storage (mem.users). In a serverless environment (Vercel), in-memory data will NOT persist across serverless function invocations. Ensure MONGODB_URI is configured in Vercel project environment variables.'
+        throw new Error(
+          'Production database connection is not available. Please verify MONGODB_URI in Vercel project environment variables.'
         );
       }
       mem.businesses.push(newGym);
@@ -2803,6 +2813,9 @@ export class GymService {
     if (db) {
       await db.collection('users').insertOne(newUser);
     } else {
+      if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+        throw new Error('Database connection is required in production to create gym owner');
+      }
       mem.users.push(newUser);
     }
 
@@ -2969,6 +2982,9 @@ export class GymService {
     if (db) {
       await db.collection('users').insertOne(newStaff);
     } else {
+      if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+        throw new Error('Database connection is required in production to create gym staff');
+      }
       mem.users.push(newStaff);
     }
 

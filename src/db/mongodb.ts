@@ -12,7 +12,7 @@ export function getMongoUri(): string {
 export function extractDbFromUri(uri: string): string | null {
   try {
     const parsed = new URL(uri.replace(/^mongodb(\+srv)?:\/\//, 'http://'));
-    const pathname = parsed.pathname.replace(/^\//, '').trim();
+    const pathname = parsed.pathname.replace(/^\//, '').split('?')[0].trim();
     return pathname || null;
   } catch {
     return null;
@@ -29,7 +29,9 @@ export function getMongoDbName(): string {
   return 'gym_pos_db';
 }
 
-let cachedDb: Db | null = null;
+declare global {
+  var _cachedDb: Db | undefined;
+}
 
 /**
  * Connect to MongoDB with caching for serverless environments (Vercel)
@@ -40,8 +42,8 @@ export async function getMongoDb(): Promise<Db | null> {
     return null;
   }
 
-  if (cachedDb) {
-    return cachedDb;
+  if (global._cachedDb) {
+    return global._cachedDb;
   }
 
   try {
@@ -51,18 +53,21 @@ export async function getMongoDb(): Promise<Db | null> {
         serverSelectionTimeoutMS: 15000,
         connectTimeoutMS: 15000,
       });
-      global._mongoClientPromise = client.connect();
+      global._mongoClientPromise = client.connect().catch((connectErr) => {
+        global._mongoClientPromise = undefined;
+        throw connectErr;
+      });
     }
 
     const client = await global._mongoClientPromise;
     const dbName = getMongoDbName();
     const db = client.db(dbName);
-    cachedDb = db;
+    global._cachedDb = db;
     return db;
   } catch (error) {
     console.error('Failed to connect to MongoDB Atlas:', error);
     global._mongoClientPromise = undefined;
-    cachedDb = null;
+    global._cachedDb = undefined;
     return null;
   }
 }

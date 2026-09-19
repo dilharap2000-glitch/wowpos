@@ -11,7 +11,7 @@ function getMongoUri() {
 function extractDbFromUri(uri) {
   try {
     const parsed = new URL(uri.replace(/^mongodb(\+srv)?:\/\//, "http://"));
-    const pathname = parsed.pathname.replace(/^\//, "").trim();
+    const pathname = parsed.pathname.replace(/^\//, "").split("?")[0].trim();
     return pathname || null;
   } catch {
     return null;
@@ -26,14 +26,13 @@ function getMongoDbName() {
   if (fromUri) return fromUri;
   return "gym_pos_db";
 }
-var cachedDb = null;
 async function getMongoDb() {
   const uri = getMongoUri();
   if (!uri) {
     return null;
   }
-  if (cachedDb) {
-    return cachedDb;
+  if (global._cachedDb) {
+    return global._cachedDb;
   }
   try {
     if (!global._mongoClientPromise) {
@@ -42,17 +41,20 @@ async function getMongoDb() {
         serverSelectionTimeoutMS: 15e3,
         connectTimeoutMS: 15e3
       });
-      global._mongoClientPromise = client2.connect();
+      global._mongoClientPromise = client2.connect().catch((connectErr) => {
+        global._mongoClientPromise = void 0;
+        throw connectErr;
+      });
     }
     const client = await global._mongoClientPromise;
     const dbName = getMongoDbName();
     const db = client.db(dbName);
-    cachedDb = db;
+    global._cachedDb = db;
     return db;
   } catch (error) {
     console.error("Failed to connect to MongoDB Atlas:", error);
     global._mongoClientPromise = void 0;
-    cachedDb = null;
+    global._cachedDb = void 0;
     return null;
   }
 }
@@ -2562,6 +2564,9 @@ var GymService = class {
       if (db) {
         await db.collection("users").insertOne(createdOwner);
       } else {
+        if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+          throw new Error("Database connection is required in production to create gym owner");
+        }
         mem.users.push(createdOwner);
       }
     }
@@ -2635,14 +2640,20 @@ var GymService = class {
       { businessId, gymId, key: "email", value: cleanEmail },
       { businessId, gymId, key: "receipt_footer", value: `Thank you for training with ${cleanGymName}! Powered by WOW POS.` }
     ];
+    const uri = getMongoUri();
+    if (!db && uri) {
+      throw new Error(
+        "Database connection unavailable. Cannot create gym account in offline memory mode when database is configured. Please check MongoDB Atlas connection."
+      );
+    }
     if (db) {
       await db.collection("businesses").insertOne(newGym);
       await db.collection("users").insertOne(newOwner);
       await db.collection("settings").insertMany(defaultSettings);
     } else {
       if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
-        console.warn(
-          "[AUTH REGISTER WARNING] MongoDB Atlas is NOT connected. User is being saved to ephemeral in-memory storage (mem.users). In a serverless environment (Vercel), in-memory data will NOT persist across serverless function invocations. Ensure MONGODB_URI is configured in Vercel project environment variables."
+        throw new Error(
+          "Production database connection is not available. Please verify MONGODB_URI in Vercel project environment variables."
         );
       }
       mem.businesses.push(newGym);
@@ -2702,6 +2713,9 @@ var GymService = class {
     if (db) {
       await db.collection("users").insertOne(newUser);
     } else {
+      if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+        throw new Error("Database connection is required in production to create gym owner");
+      }
       mem.users.push(newUser);
     }
     return newUser;
@@ -2836,6 +2850,9 @@ var GymService = class {
     if (db) {
       await db.collection("users").insertOne(newStaff);
     } else {
+      if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+        throw new Error("Database connection is required in production to create gym staff");
+      }
       mem.users.push(newStaff);
     }
     return newStaff;
