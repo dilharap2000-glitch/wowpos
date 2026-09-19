@@ -5,10 +5,26 @@ import * as dotenv from "dotenv";
 // src/db/mongodb.ts
 import { MongoClient } from "mongodb";
 function getMongoUri() {
-  return process.env.MONGODB_URI || "";
+  const raw = process.env.MONGODB_URI || "";
+  return raw.trim().replace(/^["']|["']$/g, "");
+}
+function extractDbFromUri(uri) {
+  try {
+    const parsed = new URL(uri.replace(/^mongodb(\+srv)?:\/\//, "http://"));
+    const pathname = parsed.pathname.replace(/^\//, "").trim();
+    return pathname || null;
+  } catch {
+    return null;
+  }
 }
 function getMongoDbName() {
-  return process.env.MONGODB_DB_NAME || "gym_pos_db";
+  const raw = process.env.MONGODB_DB_NAME || "";
+  const cleaned = raw.trim().replace(/^["']|["']$/g, "");
+  if (cleaned) return cleaned;
+  const uri = getMongoUri();
+  const fromUri = extractDbFromUri(uri);
+  if (fromUri) return fromUri;
+  return "gym_pos_db";
 }
 var cachedDb = null;
 async function getMongoDb() {
@@ -23,16 +39,20 @@ async function getMongoDb() {
     if (!global._mongoClientPromise) {
       const client2 = new MongoClient(uri, {
         maxPoolSize: 10,
-        serverSelectionTimeoutMS: 5e3
+        serverSelectionTimeoutMS: 15e3,
+        connectTimeoutMS: 15e3
       });
       global._mongoClientPromise = client2.connect();
     }
     const client = await global._mongoClientPromise;
-    const db = client.db(getMongoDbName());
+    const dbName = getMongoDbName();
+    const db = client.db(dbName);
     cachedDb = db;
     return db;
   } catch (error) {
     console.error("Failed to connect to MongoDB Atlas:", error);
+    global._mongoClientPromise = void 0;
+    cachedDb = null;
     return null;
   }
 }
@@ -1497,7 +1517,7 @@ var GymService = class {
     }
     try {
       const gymDetails = await this.getGymDetails(businessId);
-      const gymName = gymDetails?.gymName || "ZENERGY FITNESS";
+      const gymName = gymDetails?.gymName || "Gym Management";
       const cleanPkg = data.package.replace(/_/g, " ").toUpperCase();
       const welcomeMsg = "Welcome to " + gymName + ", " + data.fullName + "! Your " + cleanPkg + " membership is active until " + expiryDate + ". Payment received: Rs. " + data.paymentAmount.toLocaleString() + ". Member ID: " + memberNumber + ".";
       await sendSms({
@@ -1649,7 +1669,7 @@ var GymService = class {
     }
     try {
       const gymDetails = await this.getGymDetails(businessId);
-      const gymName = gymDetails?.gymName || "ZENERGY FITNESS";
+      const gymName = gymDetails?.gymName || "Gym Management";
       const cleanPkg = data.package.replace(/_/g, " ").toUpperCase();
       const renewMsg = "Payment Received: Rs. " + data.paymentAmount.toLocaleString() + " for " + member.fullName + ". Your " + cleanPkg + " membership at " + gymName + " is renewed until " + expiryDate + ".";
       await sendSms({
@@ -2367,29 +2387,45 @@ var GymService = class {
   static async findUserByUsername(username, businessId) {
     await ensureMongoSeeded();
     const db = await getMongoDb();
-    const cleanUsername = username.trim().toLowerCase();
+    const cleanUsername = String(username || "").trim();
+    if (!cleanUsername) return null;
+    const cleanLower = cleanUsername.toLowerCase();
+    const escaped = cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (db) {
       const q = {
-        $or: [{ username: cleanUsername }, { email: cleanUsername }]
+        $or: [
+          { username: cleanUsername },
+          { username: cleanLower },
+          { email: cleanLower },
+          { username: { $regex: `^${escaped}$`, $options: "i" } },
+          { email: { $regex: `^${escaped}$`, $options: "i" } }
+        ]
       };
       if (businessId) q.businessId = businessId;
       return db.collection("users").findOne(q);
     }
     return mem.users.find(
-      (u) => (u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanUsername) && (!businessId || u.businessId === businessId)
+      (u) => (u.username?.toLowerCase() === cleanLower || u.email?.toLowerCase() === cleanLower) && (!businessId || u.businessId === businessId)
     );
   }
   static async findUserByEmail(email, businessId) {
     await ensureMongoSeeded();
     const db = await getMongoDb();
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    if (!cleanEmail) return null;
+    const escaped = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (db) {
-      const q = { email: cleanEmail };
+      const q = {
+        $or: [
+          { email: cleanEmail },
+          { email: { $regex: `^${escaped}$`, $options: "i" } }
+        ]
+      };
       if (businessId) q.businessId = businessId;
       return db.collection("users").findOne(q);
     }
     return mem.users.find(
-      (u) => u.email.toLowerCase() === cleanEmail && (!businessId || u.businessId === businessId)
+      (u) => u.email?.toLowerCase() === cleanEmail && (!businessId || u.businessId === businessId)
     );
   }
   static async findUserByUid(uid) {
@@ -2604,6 +2640,11 @@ var GymService = class {
       await db.collection("users").insertOne(newOwner);
       await db.collection("settings").insertMany(defaultSettings);
     } else {
+      if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+        console.warn(
+          "[AUTH REGISTER WARNING] MongoDB Atlas is NOT connected. User is being saved to ephemeral in-memory storage (mem.users). In a serverless environment (Vercel), in-memory data will NOT persist across serverless function invocations. Ensure MONGODB_URI is configured in Vercel project environment variables."
+        );
+      }
       mem.businesses.push(newGym);
       mem.users.push(newOwner);
       mem.settings.push(...defaultSettings);
@@ -2818,8 +2859,11 @@ var GymService = class {
 
 // src/middleware/auth.ts
 import jwt from "jsonwebtoken";
-var JWT_SECRET = process.env.AUTH_SECRET || process.env.JWT_SECRET || "gym_saas_secure_jwt_secret_key_2026";
+function getJwtSecret() {
+  return process.env.AUTH_SECRET || process.env.JWT_SECRET || "gym_saas_secure_jwt_secret_key_2026";
+}
 function generateToken(user) {
+  const secret = getJwtSecret();
   const payload = {
     uid: user.uid,
     id: user.id,
@@ -2830,14 +2874,15 @@ function generateToken(user) {
     // 30 days
   };
   try {
-    return jwt.sign(payload, JWT_SECRET);
+    return jwt.sign(payload, secret);
   } catch (e) {
     return `gym_token_${Buffer.from(JSON.stringify(payload)).toString("base64")}`;
   }
 }
 function parseToken(tokenStr) {
   try {
-    const decoded = jwt.verify(tokenStr, JWT_SECRET);
+    const secret = getJwtSecret();
+    const decoded = jwt.verify(tokenStr, secret);
     if (decoded && decoded.uid) {
       return {
         uid: decoded.uid,
@@ -3046,35 +3091,8 @@ app.get("/api/health", async (req, res) => {
   });
 });
 app.post("/api/auth/login", async (req, res) => {
-  const { username, email, password, passkey, isDemo } = req.body;
+  const { username, email, password } = req.body;
   try {
-    if (passkey === "gym_admin_secret_session_active" || passkey === "reception_quick_access" || isDemo) {
-      const defaultOwner = await GymService.findUserByUsername("admin");
-      const gymRecord = await GymService.getGymDetails(defaultOwner?.businessId || defaultOwner?.gymId || 1);
-      const token2 = generateToken({
-        uid: defaultOwner ? defaultOwner.uid : "gym_admin_reception",
-        id: defaultOwner ? defaultOwner.id : 2,
-        role: "GYM_OWNER",
-        businessId: defaultOwner?.businessId || "biz_1",
-        gymId: defaultOwner?.gymId || 1
-      });
-      return res.json({
-        success: true,
-        token: token2,
-        user: {
-          id: defaultOwner ? defaultOwner.id : 2,
-          uid: defaultOwner ? defaultOwner.uid : "gym_admin_reception",
-          username: defaultOwner?.username || "admin",
-          email: defaultOwner?.email || "contact@zenergyfitness.com",
-          name: defaultOwner?.name || "Gym Administrator",
-          role: "GYM_OWNER",
-          businessId: defaultOwner?.businessId || "biz_1",
-          gymId: defaultOwner?.gymId || 1,
-          gymName: gymRecord?.gymName || "ZENERGY FITNESS",
-          status: defaultOwner?.status || "active"
-        }
-      });
-    }
     const rawIdentifier = String(email || username || "").trim().toLowerCase();
     if (!rawIdentifier || !password) {
       return res.status(400).json({ error: "Email or Username and password are required" });
@@ -3084,10 +3102,22 @@ app.post("/api/auth/login", async (req, res) => {
       user = await GymService.findUserByUsername(rawIdentifier);
     }
     if (!user) {
+      const db = await getMongoDb();
+      console.warn("[AUTH LOGIN 401] User record not found for identifier:", {
+        identifier: rawIdentifier,
+        dbConnected: !!db,
+        databaseName: db?.databaseName,
+        storageType: db ? "mongodb_atlas" : "memory_fallback"
+      });
       return res.status(401).json({ error: "Invalid email/username or password" });
     }
-    const isPasswordValid = verifyPassword(password, user.password) || rawIdentifier === "superadmin" && password === "admin123" || rawIdentifier === "titan" && password === "admin123" || rawIdentifier === "admin" && (password === "admin123" || password === "gymfit2026") || rawIdentifier === "staff" && (password === "admin123" || password === "staff123") || rawIdentifier === "reception" && (password === "admin123" || password === "reception123");
+    const isPasswordValid = verifyPassword(password, user.password);
     if (!isPasswordValid) {
+      console.warn("[AUTH LOGIN 401] Password verification failed for user:", {
+        userId: user.id,
+        username: user.username,
+        email: user.email
+      });
       return res.status(401).json({ error: "Invalid email/username or password" });
     }
     if (user.status === "inactive") {
@@ -3171,6 +3201,15 @@ app.post("/api/auth/register", async (req, res) => {
       businessId: owner.businessId,
       gymId: owner.gymId
     });
+    const db = await getMongoDb();
+    console.log("[AUTH REGISTER 201] Successfully created gym owner account:", {
+      gymId: gym.id,
+      ownerId: owner.id,
+      email: owner.email,
+      username: owner.username,
+      storageType: db ? "mongodb_atlas" : "memory_fallback",
+      databaseName: db?.databaseName
+    });
     return res.status(201).json({
       success: true,
       message: "Gym account and owner profile created successfully",
@@ -3239,12 +3278,13 @@ app.get("/api/businesses", async (req, res) => {
 });
 app.get("/api/business/public", async (req, res) => {
   try {
-    const targetGymId = Number(req.headers["x-target-gym-id"]) || 1;
+    const rawTarget = req.headers["x-target-gym-id"] || req.query.gymId;
+    const targetGymId = rawTarget ? Number(rawTarget) : 1;
     const businessId = resolveBusinessId(targetGymId);
     const gymDetails = await GymService.getGymDetails(businessId);
     const settingsMap = await GymService.getSettings(businessId);
     res.json({
-      gymName: gymDetails?.gymName || settingsMap["gym_name"] || "ZENERGY FITNESS",
+      gymName: gymDetails?.gymName || settingsMap["gym_name"] || "Gym Management",
       logo: gymDetails?.logo || settingsMap["logo"] || null,
       phone: gymDetails?.phone || settingsMap["phone"] || settingsMap["gym_phone"] || null,
       address: gymDetails?.address || settingsMap["address"] || settingsMap["gym_address"] || null,

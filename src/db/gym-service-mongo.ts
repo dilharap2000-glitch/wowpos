@@ -2417,26 +2417,28 @@ export class GymService {
   static async findUserByUsername(username: string, businessId?: string) {
     await ensureMongoSeeded();
     const db = await getMongoDb();
-    const cleanUsername = (username || '').trim();
+    const cleanUsername = String(username || '').trim();
     if (!cleanUsername) return null;
+    const cleanLower = cleanUsername.toLowerCase();
     const escaped = cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const caseInsensitiveRegex = new RegExp(`^${escaped}$`, 'i');
 
     if (db) {
       const q: any = {
         $or: [
-          { username: { $regex: caseInsensitiveRegex } },
-          { email: { $regex: caseInsensitiveRegex } },
+          { username: cleanUsername },
+          { username: cleanLower },
+          { email: cleanLower },
+          { username: { $regex: `^${escaped}$`, $options: 'i' } },
+          { email: { $regex: `^${escaped}$`, $options: 'i' } },
         ],
       };
       if (businessId) q.businessId = businessId;
       return db.collection('users').findOne(q);
     }
 
-    const lower = cleanUsername.toLowerCase();
     return mem.users.find(
       (u) =>
-        (u.username?.toLowerCase() === lower || u.email?.toLowerCase() === lower) &&
+        (u.username?.toLowerCase() === cleanLower || u.email?.toLowerCase() === cleanLower) &&
         (!businessId || u.businessId === businessId)
     );
   }
@@ -2444,21 +2446,24 @@ export class GymService {
   static async findUserByEmail(email: string, businessId?: string) {
     await ensureMongoSeeded();
     const db = await getMongoDb();
-    const cleanEmail = (email || '').trim();
+    const cleanEmail = String(email || '').trim().toLowerCase();
     if (!cleanEmail) return null;
     const escaped = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const caseInsensitiveRegex = new RegExp(`^${escaped}$`, 'i');
 
     if (db) {
-      const q: any = { email: { $regex: caseInsensitiveRegex } };
+      const q: any = {
+        $or: [
+          { email: cleanEmail },
+          { email: { $regex: `^${escaped}$`, $options: 'i' } },
+        ],
+      };
       if (businessId) q.businessId = businessId;
       return db.collection('users').findOne(q);
     }
 
-    const lower = cleanEmail.toLowerCase();
     return mem.users.find(
       (u) =>
-        u.email?.toLowerCase() === lower &&
+        u.email?.toLowerCase() === cleanEmail &&
         (!businessId || u.businessId === businessId)
     );
   }
@@ -2730,6 +2735,11 @@ export class GymService {
       await db.collection('users').insertOne(newOwner);
       await db.collection('settings').insertMany(defaultSettings);
     } else {
+      if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+        console.warn(
+          '[AUTH REGISTER WARNING] MongoDB Atlas is NOT connected. User is being saved to ephemeral in-memory storage (mem.users). In a serverless environment (Vercel), in-memory data will NOT persist across serverless function invocations. Ensure MONGODB_URI is configured in Vercel project environment variables.'
+        );
+      }
       mem.businesses.push(newGym);
       mem.users.push(newOwner);
       mem.settings.push(...defaultSettings);

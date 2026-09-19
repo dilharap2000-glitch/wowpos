@@ -1,7 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import * as dotenv from 'dotenv';
 import { GymService, resolveBusinessId, resolveGymId, ensureMongoSeeded } from '../db/gym-service-mongo.ts';
-import { checkMongoHealth } from '../db/mongodb.ts';
+import { checkMongoHealth, getMongoDb } from '../db/mongodb.ts';
 import { sendSms } from '../lib/sms/smslen.ts';
 import {
   requireAuth,
@@ -80,6 +80,13 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     if (!user) {
+      const db = await getMongoDb();
+      console.warn('[AUTH LOGIN 401] User record not found for identifier:', {
+        identifier: rawIdentifier,
+        dbConnected: !!db,
+        databaseName: db?.databaseName,
+        storageType: db ? 'mongodb_atlas' : 'memory_fallback',
+      });
       return res.status(401).json({ error: 'Invalid email/username or password' });
     }
 
@@ -87,6 +94,11 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const isPasswordValid = verifyPassword(password, user.password);
 
     if (!isPasswordValid) {
+      console.warn('[AUTH LOGIN 401] Password verification failed for user:', {
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+      });
       return res.status(401).json({ error: 'Invalid email/username or password' });
     }
 
@@ -181,6 +193,16 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       role: owner.role,
       businessId: owner.businessId,
       gymId: owner.gymId,
+    });
+
+    const db = await getMongoDb();
+    console.log('[AUTH REGISTER 201] Successfully created gym owner account:', {
+      gymId: gym.id,
+      ownerId: owner.id,
+      email: owner.email,
+      username: owner.username,
+      storageType: db ? 'mongodb_atlas' : 'memory_fallback',
+      databaseName: db?.databaseName,
     });
 
     return res.status(201).json({

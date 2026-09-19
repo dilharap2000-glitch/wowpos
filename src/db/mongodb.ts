@@ -5,11 +5,28 @@ declare global {
 }
 
 export function getMongoUri(): string {
-  return process.env.MONGODB_URI || '';
+  const raw = process.env.MONGODB_URI || '';
+  return raw.trim().replace(/^["']|["']$/g, '');
+}
+
+export function extractDbFromUri(uri: string): string | null {
+  try {
+    const parsed = new URL(uri.replace(/^mongodb(\+srv)?:\/\//, 'http://'));
+    const pathname = parsed.pathname.replace(/^\//, '').trim();
+    return pathname || null;
+  } catch {
+    return null;
+  }
 }
 
 export function getMongoDbName(): string {
-  return process.env.MONGODB_DB_NAME || 'gym_pos_db';
+  const raw = process.env.MONGODB_DB_NAME || '';
+  const cleaned = raw.trim().replace(/^["']|["']$/g, '');
+  if (cleaned) return cleaned;
+  const uri = getMongoUri();
+  const fromUri = extractDbFromUri(uri);
+  if (fromUri) return fromUri;
+  return 'gym_pos_db';
 }
 
 let cachedDb: Db | null = null;
@@ -31,17 +48,21 @@ export async function getMongoDb(): Promise<Db | null> {
     if (!global._mongoClientPromise) {
       const client = new MongoClient(uri, {
         maxPoolSize: 10,
-        serverSelectionTimeoutMS: 5000,
+        serverSelectionTimeoutMS: 15000,
+        connectTimeoutMS: 15000,
       });
       global._mongoClientPromise = client.connect();
     }
 
     const client = await global._mongoClientPromise;
-    const db = client.db(getMongoDbName());
+    const dbName = getMongoDbName();
+    const db = client.db(dbName);
     cachedDb = db;
     return db;
   } catch (error) {
     console.error('Failed to connect to MongoDB Atlas:', error);
+    global._mongoClientPromise = undefined;
+    cachedDb = null;
     return null;
   }
 }
