@@ -74,6 +74,9 @@ const initialStore: MemoryStore = {
       timezone: 'Asia/Colombo',
       description: 'High-Energy Functional Fitness, Strength & Conditioning',
       receiptFooter: 'Thank you for training with ZENERGY FITNESS! Goods sold are exchangeable within 7 days.',
+      smsSenderId: 'ZENERGY GYM',
+      smsUrl: 'https://www.smslenz.lk/api/send-sms',
+      smsEnabled: 'true',
       createdAt: new Date(),
       updatedAt: new Date(),
     },
@@ -972,6 +975,11 @@ const initialStore: MemoryStore = {
     { businessId: 'biz_1', gymId: 1, key: 'description', value: 'High-Energy Functional Fitness, Strength & Conditioning' },
     { businessId: 'biz_1', gymId: 1, key: 'admission_fee', value: '1000' },
     { businessId: 'biz_1', gymId: 1, key: 'receipt_footer', value: 'Thank you for training with ZENERGY FITNESS! Goods sold are exchangeable within 7 days.' },
+    { businessId: 'biz_1', gymId: 1, key: 'sms_sender_id', value: 'ZENERGY GYM' },
+    { businessId: 'biz_1', gymId: 1, key: 'sms_api_url', value: 'https://www.smslenz.lk/api/send-sms' },
+    { businessId: 'biz_1', gymId: 1, key: 'sms_provider_name', value: 'SMSlenz Sri Lanka' },
+    { businessId: 'biz_1', gymId: 1, key: 'sms_api_method', value: 'POST' },
+    { businessId: 'biz_1', gymId: 1, key: 'sms_active', value: 'true' },
     // POWER FITNESS (biz_2)
     { businessId: 'biz_2', gymId: 2, key: 'gym_name', value: 'POWER FITNESS' },
     { businessId: 'biz_2', gymId: 2, key: 'currency', value: 'Rs.' },
@@ -2580,6 +2588,16 @@ export class GymService {
     if (data.currency !== undefined) updates.currency = data.currency ? data.currency.trim() : 'Rs.';
     if (data.description !== undefined) updates.description = data.description ? data.description.trim() : null;
     if (data.receiptFooter !== undefined) updates.receiptFooter = data.receiptFooter;
+    if (data.smsUrl !== undefined) updates.smsUrl = data.smsUrl;
+    if (data.smsSenderId !== undefined) updates.smsSenderId = data.smsSenderId;
+    if (data.smsEnabled !== undefined) updates.smsEnabled = data.smsEnabled;
+    if (data.smsApiKey !== undefined) {
+      const trimmed = String(data.smsApiKey).trim();
+      if (trimmed && !/^[•*]+$/.test(trimmed)) {
+        updates.smsApiKey = trimmed;
+      }
+    }
+    if (data.smsUserId !== undefined) updates.smsUserId = data.smsUserId;
     if (data.monthlyPrice !== undefined) updates.monthlyPrice = Math.round(Number(data.monthlyPrice));
     if (data.threeMonthsPrice !== undefined) updates.threeMonthsPrice = Math.round(Number(data.threeMonthsPrice));
     if (data.sixMonthsPrice !== undefined) updates.sixMonthsPrice = Math.round(Number(data.sixMonthsPrice));
@@ -2666,6 +2684,12 @@ export class GymService {
 
     if (db) {
       for (const [key, value] of Object.entries(updates)) {
+        if (key === 'sms_api_key') {
+          const trimmed = String(value).trim();
+          if (!trimmed || /^[•*]+$/.test(trimmed)) {
+            continue; // Keep existing stored secret
+          }
+        }
         await db.collection('settings').updateOne(
           { businessId, key },
           { $set: { businessId, gymId, key, value, updatedAt: new Date() } },
@@ -2674,6 +2698,12 @@ export class GymService {
       }
     } else {
       for (const [key, value] of Object.entries(updates)) {
+        if (key === 'sms_api_key') {
+          const trimmed = String(value).trim();
+          if (!trimmed || /^[•*]+$/.test(trimmed)) {
+            continue; // Keep existing stored secret
+          }
+        }
         const existing = mem.settings.find((s) => s.businessId === businessId && s.key === key);
         if (existing) {
           existing.value = value;

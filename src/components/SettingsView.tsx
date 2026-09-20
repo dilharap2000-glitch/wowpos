@@ -80,16 +80,19 @@ export const SettingsView: React.FC = () => {
   const [smsActive, setSmsActive] = useState<boolean>(true);
   const [smsApiKey, setSmsApiKey] = useState<string>('');
   const [smsUserId, setSmsUserId] = useState<string>('');
-  const [smsSenderId, setSmsSenderId] = useState<string>('TITANFIT');
-  const [smsProviderName, setSmsProviderName] = useState<string>('SMSLEN Sri Lanka');
-  const [smsApiUrl, setSmsApiUrl] = useState<string>('https://api.smslen.com/v1/send');
+  const [smsSenderId, setSmsSenderId] = useState<string>('ZENERGY GYM');
+  const [smsProviderName, setSmsProviderName] = useState<string>('SMSlenz Sri Lanka');
+  const [smsApiUrl, setSmsApiUrl] = useState<string>('https://www.smslenz.lk/api/send-sms');
   const [smsApiMethod, setSmsApiMethod] = useState<'GET' | 'POST'>('POST');
+  const [smsHasKeyOnServer, setSmsHasKeyOnServer] = useState<boolean>(false);
 
-  // Test SMS State
+  // Test SMS & Diagnostics State
   const [testPhone, setTestPhone] = useState('');
-  const [testMessage, setTestMessage] = useState('Test SMS from Gym POS Gateway. System online.');
+  const [testMessage, setTestMessage] = useState('WOW POS test message from ZENERGY GYM');
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
+  const [checkingAccount, setCheckingAccount] = useState(false);
+  const [accountStatusResult, setAccountStatusResult] = useState<any>(null);
 
   // New Staff Modal
   const [showStaffModal, setShowStaffModal] = useState(false);
@@ -156,11 +159,12 @@ export const SettingsView: React.FC = () => {
       if (res.sms_active !== undefined) setSmsActive(res.sms_active === 'true');
       else if (res.sms_enabled !== undefined) setSmsActive(res.sms_enabled === 'true');
 
+      setSmsHasKeyOnServer(res.sms_has_api_key === 'true');
       if (res.sms_api_key) setSmsApiKey(res.sms_api_key);
       if (res.sms_user_id) setSmsUserId(res.sms_user_id);
-      if (res.sms_sender_id) setSmsSenderId(res.sms_sender_id);
-      if (res.sms_provider_name) setSmsProviderName(res.sms_provider_name);
-      if (res.sms_api_url) setSmsApiUrl(res.sms_api_url);
+      setSmsSenderId(res.sms_sender_id || 'ZENERGY GYM');
+      setSmsProviderName(res.sms_provider_name || 'SMSlenz Sri Lanka');
+      setSmsApiUrl(res.sms_api_url || res.sms_url || 'https://www.smslenz.lk/api/send-sms');
       if (res.sms_api_method) setSmsApiMethod(res.sms_api_method as 'GET' | 'POST');
 
       // Populate Gym Profile
@@ -396,6 +400,23 @@ export const SettingsView: React.FC = () => {
       });
     } finally {
       setSendingTest(false);
+    }
+  };
+
+  // Check Account Status & SMS Balance
+  const handleCheckAccountStatus = async () => {
+    setCheckingAccount(true);
+    setAccountStatusResult(null);
+    try {
+      const res = await api.checkSmsAccountStatus();
+      setAccountStatusResult(res);
+    } catch (err: any) {
+      setAccountStatusResult({
+        success: false,
+        error: err.message || 'Failed to check account status',
+      });
+    } finally {
+      setCheckingAccount(false);
     }
   };
 
@@ -1290,7 +1311,7 @@ export const SettingsView: React.FC = () => {
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. SMSLEN, Twilio, Dialog"
+                      placeholder="SMSlenz Sri Lanka"
                       value={smsProviderName}
                       onChange={(e) => setSmsProviderName(e.target.value)}
                       className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-gray-600 focus:border-[#FACC15] focus:outline-none"
@@ -1299,29 +1320,44 @@ export const SettingsView: React.FC = () => {
 
                   {/* Sender ID */}
                   <div>
-                    <label className="text-xs font-black uppercase tracking-wider text-gray-300 block mb-1">
-                      Sender ID (Mask)
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-black uppercase tracking-wider text-gray-300">
+                        Approved Sender ID (Mask)
+                      </label>
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded">
+                        SMSlenz Approved
+                      </span>
+                    </div>
                     <input
                       type="text"
                       maxLength={11}
-                      placeholder="e.g. TITANFIT, CHAMAAGYM"
+                      placeholder="ZENERGY GYM"
                       value={smsSenderId}
                       onChange={(e) => setSmsSenderId(e.target.value)}
                       className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-sm text-white uppercase font-mono placeholder-gray-600 focus:border-[#FACC15] focus:outline-none"
                     />
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Sender ID <strong className="text-white">ZENERGY GYM</strong> is officially approved by SMSlenz. Do not use demo sender IDs.
+                    </p>
                   </div>
                 </div>
 
                 {/* API Key */}
                 <div>
-                  <label className="text-xs font-black uppercase tracking-wider text-gray-300 block mb-1">
-                    API Key / Auth Token
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-black uppercase tracking-wider text-gray-300">
+                      API Key (Server-Side Only)
+                    </label>
+                    {smsHasKeyOnServer && (
+                      <span className="text-[10px] font-bold text-blue-400 bg-blue-950/60 border border-blue-800/60 px-2 py-0.5 rounded">
+                        Configured & Protected
+                      </span>
+                    )}
+                  </div>
                   <div className="relative">
                     <input
                       type={showApiKey ? 'text' : 'password'}
-                      placeholder="Enter SMS gateway secret key"
+                      placeholder={smsHasKeyOnServer ? '•••••••••••••••• (Leave unchanged to keep)' : 'Enter SMSlenz API Key'}
                       value={smsApiKey}
                       onChange={(e) => setSmsApiKey(e.target.value)}
                       className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-sm text-white font-mono placeholder-gray-600 pr-10 focus:border-[#FACC15] focus:outline-none"
@@ -1334,21 +1370,27 @@ export const SettingsView: React.FC = () => {
                       {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Credentials remain server-side only. Secret keys are never exposed to browser or client payloads.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* User ID / Account SID */}
+                  {/* User ID */}
                   <div className="md:col-span-2">
                     <label className="text-xs font-black uppercase tracking-wider text-gray-300 block mb-1">
-                      User ID / Account Identifier
+                      User ID (user_id) *
                     </label>
                     <input
                       type="text"
-                      placeholder="Optional User ID or Account SID"
+                      placeholder="e.g. 1024 (Provided by SMSlenz portal)"
                       value={smsUserId}
                       onChange={(e) => setSmsUserId(e.target.value)}
                       className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-sm text-white font-mono placeholder-gray-600 focus:border-[#FACC15] focus:outline-none"
                     />
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Required by SMSlenz API authentication schema.
+                    </p>
                   </div>
 
                   {/* HTTP Method */}
@@ -1361,9 +1403,12 @@ export const SettingsView: React.FC = () => {
                       onChange={(e) => setSmsApiMethod(e.target.value as 'GET' | 'POST')}
                       className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-sm text-white font-mono focus:border-[#FACC15] focus:outline-none"
                     >
-                      <option value="POST">POST (JSON/Body)</option>
-                      <option value="GET">GET (Query String)</option>
+                      <option value="POST">POST (Recommended)</option>
+                      <option value="GET">GET (Query String with %2B)</option>
                     </select>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      POST is standard for SMSlenz JSON body.
+                    </p>
                   </div>
                 </div>
 
@@ -1374,16 +1419,29 @@ export const SettingsView: React.FC = () => {
                   </label>
                   <input
                     type="url"
-                    placeholder="https://api.smslen.com/v1/send"
+                    placeholder="https://www.smslenz.lk/api/send-sms"
                     value={smsApiUrl}
                     onChange={(e) => setSmsApiUrl(e.target.value)}
                     className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-sm text-white font-mono placeholder-gray-600 focus:border-[#FACC15] focus:outline-none"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Official SMSlenz Sri Lanka Send SMS endpoint: <code className="text-gray-300">https://www.smslenz.lk/api/send-sms</code>
+                  </p>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end pt-4 border-t border-white/10">
+              <div className="flex items-center justify-between pt-4 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={handleCheckAccountStatus}
+                  disabled={checkingAccount}
+                  className="px-4 py-2.5 rounded-xl border border-white/10 hover:border-[#FACC15]/40 text-xs font-bold text-gray-300 hover:text-white bg-white/5 transition-all flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${checkingAccount ? 'animate-spin text-[#FACC15]' : ''}`} />
+                  {checkingAccount ? 'Checking Account...' : 'Check Account & Balance'}
+                </button>
+
                 <button
                   type="submit"
                   disabled={saving}
@@ -1393,6 +1451,36 @@ export const SettingsView: React.FC = () => {
                   {saving ? 'Saving...' : 'SAVE GATEWAY CONFIGURATION'}
                 </button>
               </div>
+
+              {/* Account Status Diagnostic Result Banner */}
+              {accountStatusResult && (
+                <div
+                  className={`p-4 rounded-2xl border text-xs space-y-2 mt-3 ${
+                    accountStatusResult.success
+                      ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                      : 'bg-amber-950/60 border-amber-800 text-amber-300'
+                  }`}
+                >
+                  <div className="font-bold flex items-center justify-between">
+                    <span className="uppercase tracking-wider font-mono">
+                      SMSlenz Account Status: {accountStatusResult.success ? 'Active / Online' : 'Status Check Notice'}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-black/40 border border-white/10 font-mono">
+                      HTTP {accountStatusResult.httpStatus || 0}
+                    </span>
+                  </div>
+                  {accountStatusResult.error && (
+                    <p className="text-xs text-amber-200">{accountStatusResult.error}</p>
+                  )}
+                  {accountStatusResult.data && (
+                    <pre className="font-mono text-[10px] bg-black/50 p-2 rounded-xl text-gray-300 overflow-x-auto max-h-24">
+                      {typeof accountStatusResult.data === 'object'
+                        ? JSON.stringify(accountStatusResult.data, null, 2)
+                        : accountStatusResult.data}
+                    </pre>
+                  )}
+                </div>
+              )}
             </form>
           </div>
 
@@ -1407,22 +1495,25 @@ export const SettingsView: React.FC = () => {
               </div>
 
               <p className="text-xs text-gray-400">
-                Verify your gateway connection and credentials by dispatching a live test message.
+                Dispatch a live test SMS via <strong className="text-white">SMSlenz Sri Lanka</strong>. Recipient numbers are automatically normalized to <code className="text-[#FACC15]">+947XXXXXXXX</code>.
               </p>
 
               <form onSubmit={handleSendTestSms} className="space-y-3">
                 <div>
                   <label className="text-xs font-semibold text-gray-300 block mb-1">
-                    Phone Number *
+                    Recipient Mobile Number *
                   </label>
                   <input
                     type="tel"
                     required
-                    placeholder="+94 77 123 4567"
+                    placeholder="077 123 4567 or +94 77 123 4567"
                     value={testPhone}
                     onChange={(e) => setTestPhone(e.target.value)}
                     className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-gray-600 focus:border-[#FACC15] focus:outline-none"
                   />
+                  <span className="text-[10px] text-gray-500 block mt-1">
+                    Accepts: 077XXXXXXX, 947XXXXXXX, or +947XXXXXXX
+                  </span>
                 </div>
 
                 <div>
@@ -1448,33 +1539,125 @@ export const SettingsView: React.FC = () => {
                   }`}
                 >
                   <Send className="w-3.5 h-3.5" />
-                  {sendingTest ? 'Sending Test SMS...' : 'SEND TEST SMS'}
+                  {sendingTest ? 'Dispatching via SMSlenz...' : 'DISPATCH TEST SMS'}
                 </button>
               </form>
 
-              {/* Test Result Display */}
+              {/* Comprehensive Diagnostic Response Card */}
               {testResult && (
                 <div
-                  className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
-                    testResult.success
+                  className={`p-4 rounded-2xl border text-xs space-y-3 ${
+                    testResult.status === 'delivered'
                       ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                      : testResult.success
+                      ? 'bg-blue-950/60 border-blue-800 text-blue-300'
                       : 'bg-red-950/60 border-red-800 text-red-300'
                   }`}
                 >
-                  <div className="font-bold flex items-center gap-1.5">
-                    {testResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    ) : (
-                      <AlertTriangle className="w-4 h-4 text-red-400" />
-                    )}
-                    {testResult.success ? 'Test SMS Delivered' : 'Delivery Failed'}
+                  {/* Status Banner */}
+                  <div className="font-bold flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      {testResult.status === 'delivered' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      ) : testResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-blue-400" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-red-400" />
+                      )}
+                      <span className="text-xs font-black uppercase tracking-wider">
+                        {testResult.status === 'delivered'
+                          ? 'SMS Delivered (Provider Confirmed)'
+                          : testResult.success
+                          ? 'API Request Accepted / Queued'
+                          : 'SMS Dispatch Failed'}
+                      </span>
+                    </div>
+                    <span className="font-mono text-[9px] px-2 py-0.5 rounded bg-black/40 border border-white/10 uppercase font-black">
+                      {testResult.status || 'unknown'}
+                    </span>
                   </div>
-                  {testResult.apiResponse && (
-                    <div className="font-mono text-[10px] text-gray-300 bg-black/40 p-1.5 rounded overflow-x-auto">
-                      {testResult.apiResponse}
+
+                  {/* Diagnostic Metric Grid */}
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono bg-black/50 p-2.5 rounded-xl border border-white/10">
+                    <div>
+                      <span className="text-gray-400 block text-[9px] uppercase tracking-wider font-sans">
+                        API Request Status
+                      </span>
+                      <span className="font-bold text-white">
+                        {testResult.apiStatus || (testResult.httpStatus ? `HTTP ${testResult.httpStatus}` : 'N/A')}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block text-[9px] uppercase tracking-wider font-sans">
+                        Provider Status
+                      </span>
+                      <span
+                        className={`font-bold uppercase ${
+                          testResult.status === 'delivered'
+                            ? 'text-emerald-400'
+                            : testResult.success
+                            ? 'text-blue-400'
+                            : 'text-red-400'
+                        }`}
+                      >
+                        {testResult.providerStatus || 'N/A'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block text-[9px] uppercase tracking-wider font-sans">
+                        Campaign ID
+                      </span>
+                      <span className="font-bold text-[#FACC15]">
+                        {testResult.campaignId || 'None'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block text-[9px] uppercase tracking-wider font-sans">
+                        Recipient (Masked)
+                      </span>
+                      <span className="text-gray-200">
+                        {testResult.maskedRecipient || testPhone}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block text-[9px] uppercase tracking-wider font-sans">
+                        Sender ID
+                      </span>
+                      <span className="text-gray-200">
+                        {testResult.senderId || smsSenderId}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block text-[9px] uppercase tracking-wider font-sans">
+                        HTTP Status Code
+                      </span>
+                      <span className="font-bold text-white font-mono">
+                        {testResult.httpStatus || 0}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Error Message */}
+                  {testResult.error && (
+                    <div className="p-2.5 rounded-xl bg-red-950/80 border border-red-700/60 text-red-200 text-xs">
+                      <span className="font-bold block text-[10px] uppercase tracking-wider text-red-400 mb-0.5">
+                        Error Diagnostic:
+                      </span>
+                      {testResult.error}
                     </div>
                   )}
-                  {testResult.error && <div>{testResult.error}</div>}
+
+                  {/* Raw Sanitized Response */}
+                  {testResult.apiResponse && (
+                    <div>
+                      <span className="text-[10px] text-gray-400 block mb-1 uppercase tracking-wider font-sans">
+                        Gateway Response Output:
+                      </span>
+                      <pre className="font-mono text-[10px] text-gray-300 bg-black/60 p-2 rounded-xl border border-white/10 overflow-x-auto max-h-28">
+                        {testResult.apiResponse}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1486,8 +1669,7 @@ export const SettingsView: React.FC = () => {
                 Isolated Gym Credentials
               </div>
               <p>
-                Each gym tenant maintains its own separate gateway credentials. API keys are
-                never shared across gyms and execute strictly server-side.
+                Each gym tenant maintains isolated gateway credentials. The Sender ID <strong className="text-white">ZENERGY GYM</strong> is registered and verified with Sri Lankan telecom operators via SMSlenz.
               </p>
             </div>
           </div>
@@ -1505,7 +1687,7 @@ export const SettingsView: React.FC = () => {
                 SMS Delivery Audit Logs
               </h2>
               <p className="text-xs text-gray-400">
-                Recent notifications dispatched to gym athletes and staff.
+                Audit trail of notifications dispatched to gym athletes and staff via SMSlenz.
               </p>
             </div>
             <button
@@ -1522,47 +1704,57 @@ export const SettingsView: React.FC = () => {
                 <tr>
                   <th className="p-4">Sent At</th>
                   <th className="p-4">Recipient</th>
+                  <th className="p-4">Sender ID</th>
                   <th className="p-4">Type</th>
                   <th className="p-4">Message Content</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">API Response</th>
+                  <th className="p-4">Gateway Status</th>
+                  <th className="p-4">Campaign ID</th>
+                  <th className="p-4">Diagnostics</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {smsLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="p-4 text-xs text-gray-400 whitespace-nowrap">
-                      {log.sentAt ? new Date(log.sentAt).toLocaleString() : 'Just now'}
+                      {log.sentAt || log.createdAt ? new Date(log.sentAt || log.createdAt!).toLocaleString() : 'Just now'}
                     </td>
-                    <td className="p-4 font-mono text-xs text-white">
+                    <td className="p-4 font-mono text-xs text-white whitespace-nowrap">
                       {log.phone}
                     </td>
-                    <td className="p-4 text-xs font-bold text-[#FACC15] uppercase">
+                    <td className="p-4 font-mono text-xs text-gray-300 whitespace-nowrap">
+                      {log.senderId || 'ZENERGY GYM'}
+                    </td>
+                    <td className="p-4 text-xs font-bold text-[#FACC15] uppercase whitespace-nowrap">
                       {log.messageType}
                     </td>
-                    <td className="p-4 text-xs text-gray-300 max-w-sm truncate">
+                    <td className="p-4 text-xs text-gray-300 max-w-xs truncate">
                       {log.message}
                     </td>
-                    <td className="p-4">
+                    <td className="p-4 whitespace-nowrap">
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                          log.status === 'sent'
+                          log.status === 'delivered'
                             ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                            : log.status === 'accepted' || log.status === 'sent'
+                            ? 'bg-blue-950 text-blue-400 border border-blue-800/50'
                             : 'bg-red-950 text-red-400 border border-red-800/50'
                         }`}
                       >
-                        {log.status}
+                        {log.status === 'accepted' ? 'Accepted / Queued' : log.status}
                       </span>
                     </td>
+                    <td className="p-4 font-mono text-xs text-[#FACC15]">
+                      {log.campaignId || '—'}
+                    </td>
                     <td className="p-4 text-[11px] font-mono text-gray-400 max-w-xs truncate">
-                      {log.errorMessage || log.apiResponse || 'OK'}
+                      {log.errorMessage || log.providerStatus || log.apiResponse || 'OK'}
                     </td>
                   </tr>
                 ))}
 
                 {smsLogs.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="p-12 text-center text-gray-500 text-xs uppercase font-mono">
+                    <td colSpan={8} className="p-12 text-center text-gray-500 text-xs uppercase font-mono">
                       No SMS logs recorded yet.
                     </td>
                   </tr>

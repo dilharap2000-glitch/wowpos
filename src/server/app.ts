@@ -2,7 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import * as dotenv from 'dotenv';
 import { GymService, resolveBusinessId, resolveGymId, ensureMongoSeeded } from '../db/gym-service-mongo.ts';
 import { checkMongoHealth, getMongoDb } from '../db/mongodb.ts';
-import { sendSms } from '../lib/sms/smslen.ts';
+import { sendSms, getSmsLogs, checkAccountStatus } from '../lib/sms/smslen.ts';
 import {
   requireAuth,
   requireGymTenant,
@@ -770,7 +770,10 @@ app.get('/api/reports', requireAuth, requireGymTenant, async (req: AuthRequest, 
 // SMS & Messaging
 app.get('/api/sms/logs', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
   try {
-    res.json([]);
+    const gymId = req.gymId || 1;
+    const businessId = req.businessId || resolveBusinessId(gymId);
+    const logs = await getSmsLogs(businessId || gymId);
+    res.json(logs);
   } catch (err: any) {
     console.error('Error fetching SMS logs:', err);
     res.status(500).json({ error: err.message || 'Failed to load SMS logs' });
@@ -782,7 +785,7 @@ app.post('/api/sms/test', requireAuth, requireGymTenant, async (req: AuthRequest
     const gymId = req.gymId || 1;
     const { phone, message } = req.body;
     if (!phone || !message) {
-      return res.status(400).json({ error: 'Phone and message are required' });
+      return res.status(400).json({ error: 'Phone number and test message are required' });
     }
 
     const result = await sendSms({
@@ -799,13 +802,37 @@ app.post('/api/sms/test', requireAuth, requireGymTenant, async (req: AuthRequest
   }
 });
 
+app.get('/api/sms/account-status', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
+  try {
+    const gymId = req.gymId || 1;
+    const result = await checkAccountStatus(gymId);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error checking SMS account status:', err);
+    res.status(500).json({ error: err.message || 'Failed to check account status' });
+  }
+});
+
+app.post('/api/sms/account-status', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
+  try {
+    const gymId = req.gymId || 1;
+    const result = await checkAccountStatus(gymId);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error checking SMS account status:', err);
+    res.status(500).json({ error: err.message || 'Failed to check account status' });
+  }
+});
+
 // Settings & Customization
 app.get('/api/settings', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
   try {
     const businessId = req.businessId || resolveBusinessId(req.gymId);
     const gymDetails = await GymService.getGymDetails(businessId);
+    const storedSettings = await GymService.getSettings(businessId);
 
-    const map: Record<string, string> = {};
+    const map: Record<string, string> = { ...storedSettings };
+
     if (gymDetails) {
       map['gym_name'] = gymDetails.gymName || '';
       map['logo'] = gymDetails.logo || '';
@@ -816,10 +843,23 @@ app.get('/api/settings', requireAuth, requireGymTenant, async (req: AuthRequest,
       map['description'] = gymDetails.description || '';
       map['timezone'] = gymDetails.timezone || 'Asia/Colombo';
       map['receipt_footer'] = gymDetails.receiptFooter || 'Thank you for training with us!';
-      map['sms_url'] = gymDetails.smsUrl || 'https://api.smslen.com/v1/send';
-      map['sms_api_key'] = gymDetails.smsApiKey || '';
-      map['sms_sender_id'] = gymDetails.smsSenderId || 'GYMFIT';
-      map['sms_enabled'] = gymDetails.smsEnabled || 'true';
+
+      // Official SMSlenz configuration defaults
+      map['sms_url'] = storedSettings['sms_api_url'] || storedSettings['sms_url'] || gymDetails.smsUrl || 'https://www.smslenz.lk/api/send-sms';
+      map['sms_api_url'] = map['sms_url'];
+      map['sms_sender_id'] = storedSettings['sms_sender_id'] || gymDetails.smsSenderId || 'ZENERGY GYM';
+      map['sms_provider_name'] = storedSettings['sms_provider_name'] || 'SMSlenz Sri Lanka';
+      map['sms_api_method'] = storedSettings['sms_api_method'] || 'POST';
+      map['sms_user_id'] = storedSettings['sms_user_id'] || process.env.SMSLENZ_USER_ID || process.env.SMSLEN_USER_ID || '';
+      map['sms_enabled'] = storedSettings['sms_active'] || storedSettings['sms_enabled'] || gymDetails.smsEnabled || 'true';
+      map['sms_active'] = map['sms_enabled'];
+
+      // SECURITY: Never return raw API key to the client browser!
+      const rawKey = storedSettings['sms_api_key'] || gymDetails.smsApiKey || process.env.SMSLENZ_API_KEY || process.env.SMSLEN_API_KEY || '';
+      const hasApiKey = Boolean(rawKey && rawKey.length > 0);
+      map['sms_has_api_key'] = hasApiKey ? 'true' : 'false';
+      map['sms_api_key'] = hasApiKey ? '••••••••••••••••' : '';
+
       map['monthly_price'] = String(gymDetails.monthlyPrice || 4500);
       map['three_months_price'] = String(gymDetails.threeMonthsPrice || 12000);
       map['six_months_price'] = String(gymDetails.sixMonthsPrice || 22000);
@@ -843,6 +883,29 @@ app.put('/api/settings', requireAuth, requireGymTenant, requireRoles('SUPER_ADMI
     const businessId = req.businessId || resolveBusinessId(req.gymId);
     const updates = req.body;
 
+    // Securely handle API key: only update if client sent a new real string, not empty or masked dots
+    const candidateApiKey = updates['sms_api_key'];
+    let safeApiKey: string | undefined = undefined;
+    if (typeof candidateApiKey === 'string') {
+      const trimmedKey = candidateApiKey.trim();
+      if (trimmedKey && !/^[•*]+$/.test(trimmedKey)) {
+        safeApiKey = trimmedKey;
+      }
+    }
+
+    // Save key-value settings
+    const settingsToSave: Record<string, string> = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (typeof v === 'string') {
+        if (k === 'sms_api_key') {
+          if (safeApiKey !== undefined) settingsToSave[k] = safeApiKey;
+        } else {
+          settingsToSave[k] = v;
+        }
+      }
+    }
+    await GymService.updateSettings(businessId, settingsToSave);
+
     const updatedGym = await GymService.updateGymDetails(businessId, {
       gymName: updates['gym_name'],
       logo: updates['logo'],
@@ -852,10 +915,10 @@ app.put('/api/settings', requireAuth, requireGymTenant, requireRoles('SUPER_ADMI
       description: updates['description'],
       currency: updates['currency'],
       receiptFooter: updates['receipt_footer'],
-      smsUrl: updates['sms_url'],
-      smsApiKey: updates['sms_api_key'],
-      smsSenderId: updates['sms_sender_id'],
-      smsEnabled: updates['sms_enabled'],
+      smsUrl: updates['sms_api_url'] || updates['sms_url'] || 'https://www.smslenz.lk/api/send-sms',
+      smsApiKey: safeApiKey, // only updates if not masked
+      smsSenderId: updates['sms_sender_id'] || 'ZENERGY GYM',
+      smsEnabled: updates['sms_active'] || updates['sms_enabled'],
       monthlyPrice: updates['monthly_price'] !== undefined ? Number(updates['monthly_price']) : undefined,
       threeMonthsPrice: updates['three_months_price'] !== undefined ? Number(updates['three_months_price']) : undefined,
       sixMonthsPrice: updates['six_months_price'] !== undefined ? Number(updates['six_months_price']) : undefined,

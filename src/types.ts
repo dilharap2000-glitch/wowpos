@@ -255,15 +255,21 @@ export interface Sale {
 
 export interface SmsLog {
   id: number;
+  businessId?: string;
   gymId?: number | null;
   memberId?: number | null;
   phone: string;
   messageType: string;
   message: string;
-  status: 'sent' | 'failed' | 'pending';
+  status: 'accepted' | 'delivered' | 'failed' | 'sent' | 'pending';
+  httpStatus?: number;
+  providerStatus?: string | null;
+  campaignId?: string | null;
+  senderId?: string;
   apiResponse?: string | null;
   errorMessage?: string | null;
   sentAt?: string;
+  createdAt?: string;
 }
 
 export interface AuditLog {

@@ -283,6 +283,8 @@ export const api = {
       body: JSON.stringify({ phone, message }),
     }),
 
+  checkSmsAccountStatus: () => request<any>('/api/sms/account-status'),
+
   // Settings & White-Label Business Config
   getSettings: () => request<Record<string, string>>('/api/settings', { skipAuthExpired: true }),
 
