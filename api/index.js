@@ -344,6 +344,11 @@ var initialStore = {
       threeMonthsPrice: 12e3,
       sixMonthsPrice: 22e3,
       annualPrice: 38e3,
+      admissionFee: 1e3,
+      coupleMonthlyPrice: 8e3,
+      coupleThreeMonthsPrice: 2e4,
+      coupleSixMonthsPrice: 36e3,
+      coupleAnnualPrice: 65e3,
       currency: "Rs.",
       timezone: "Asia/Colombo",
       description: "High-Energy Functional Fitness, Strength & Conditioning",
@@ -364,6 +369,11 @@ var initialStore = {
       threeMonthsPrice: 13500,
       sixMonthsPrice: 25e3,
       annualPrice: 42e3,
+      admissionFee: 1500,
+      coupleMonthlyPrice: 9e3,
+      coupleThreeMonthsPrice: 23e3,
+      coupleSixMonthsPrice: 42e3,
+      coupleAnnualPrice: 72e3,
       currency: "Rs.",
       timezone: "Asia/Colombo",
       description: "Heavy Duty Strength, Muscle & Performance Center",
@@ -384,6 +394,11 @@ var initialStore = {
       threeMonthsPrice: 180,
       sixMonthsPrice: 320,
       annualPrice: 550,
+      admissionFee: 25,
+      coupleMonthlyPrice: 110,
+      coupleThreeMonthsPrice: 300,
+      coupleSixMonthsPrice: 550,
+      coupleAnnualPrice: 950,
       currency: "$",
       timezone: "America/Los_Angeles",
       description: "Elite Athletic Conditioning, Recovery & Olympic Weightlifting",
@@ -1234,6 +1249,7 @@ var initialStore = {
     { businessId: "biz_1", gymId: 1, key: "email", value: "contact@zenergyfitness.com" },
     { businessId: "biz_1", gymId: 1, key: "address", value: "No. 12 Beach Road, Colombo 03, Sri Lanka" },
     { businessId: "biz_1", gymId: 1, key: "description", value: "High-Energy Functional Fitness, Strength & Conditioning" },
+    { businessId: "biz_1", gymId: 1, key: "admission_fee", value: "1000" },
     { businessId: "biz_1", gymId: 1, key: "receipt_footer", value: "Thank you for training with ZENERGY FITNESS! Goods sold are exchangeable within 7 days." },
     // POWER FITNESS (biz_2)
     { businessId: "biz_2", gymId: 2, key: "gym_name", value: "POWER FITNESS" },
@@ -1242,6 +1258,7 @@ var initialStore = {
     { businessId: "biz_2", gymId: 2, key: "email", value: "contact@powerfitness.lk" },
     { businessId: "biz_2", gymId: 2, key: "address", value: "88 Kandy Road, Kiribathgoda, Sri Lanka" },
     { businessId: "biz_2", gymId: 2, key: "description", value: "Heavy Duty Strength, Muscle & Performance Center" },
+    { businessId: "biz_2", gymId: 2, key: "admission_fee", value: "1500" },
     { businessId: "biz_2", gymId: 2, key: "receipt_footer", value: "Power Fitness Kandy. Push harder every single day." },
     // ELITE FITNESS (biz_3)
     { businessId: "biz_3", gymId: 3, key: "gym_name", value: "ELITE FITNESS" },
@@ -1250,6 +1267,7 @@ var initialStore = {
     { businessId: "biz_3", gymId: 3, key: "email", value: "info@elitefitness.com" },
     { businessId: "biz_3", gymId: 3, key: "address", value: "500 Olympic Way, Los Angeles, CA 90015" },
     { businessId: "biz_3", gymId: 3, key: "description", value: "Elite Athletic Conditioning, Recovery & Olympic Weightlifting" },
+    { businessId: "biz_3", gymId: 3, key: "admission_fee", value: "25" },
     { businessId: "biz_3", gymId: 3, key: "receipt_footer", value: "Excellence in athletic development. Powered by WOW POS." }
   ],
   smsLogs: []
@@ -1460,6 +1478,26 @@ var GymService = class {
       exp.setMonth(exp.getMonth() + 1);
     }
     const expiryDate = formatDateStr(exp);
+    const gymDetails = await this.getGymDetails(businessId);
+    const tenantAdmissionFee = Number(gymDetails?.admissionFee ?? (businessId === "biz_2" ? 1500 : businessId === "biz_3" ? 25 : 1e3));
+    const isCouple = data.memberType === "couple";
+    const validPackages = ["monthly", "3_months", "6_months", "annual"];
+    const selectedPackage = validPackages.includes(data.package) ? data.package : "monthly";
+    let serverMembershipAmount = 0;
+    if (isCouple) {
+      if (selectedPackage === "3_months") serverMembershipAmount = Number(gymDetails?.coupleThreeMonthsPrice) || 2e4;
+      else if (selectedPackage === "6_months") serverMembershipAmount = Number(gymDetails?.coupleSixMonthsPrice) || 36e3;
+      else if (selectedPackage === "annual") serverMembershipAmount = Number(gymDetails?.coupleAnnualPrice) || 65e3;
+      else serverMembershipAmount = Number(gymDetails?.coupleMonthlyPrice) || 8e3;
+    } else {
+      if (selectedPackage === "3_months") serverMembershipAmount = Number(gymDetails?.threeMonthsPrice) || 12e3;
+      else if (selectedPackage === "6_months") serverMembershipAmount = Number(gymDetails?.sixMonthsPrice) || 22e3;
+      else if (selectedPackage === "annual") serverMembershipAmount = Number(gymDetails?.annualPrice) || 38e3;
+      else serverMembershipAmount = Number(gymDetails?.monthlyPrice) || 4500;
+    }
+    const isAdmissionApplied = Boolean(data.addAdmissionFee || data.admissionFeeApplied);
+    const serverAdmissionFee = isAdmissionApplied ? tenantAdmissionFee : 0;
+    const serverTotalAmount = serverMembershipAmount + serverAdmissionFee;
     const memberId = Date.now();
     const newMemberDoc = {
       id: memberId,
@@ -1471,7 +1509,11 @@ var GymService = class {
       email: data.email ? data.email.trim().toLowerCase() : null,
       address: data.address ? data.address.trim() : null,
       emergencyContact: data.emergencyContact ? data.emergencyContact.trim() : null,
-      notes: data.notes ? data.notes.trim() : null,
+      notes: data.notes ? data.notes.trim() : isCouple && data.partnerName ? `Couple with ${data.partnerName.trim()}` : null,
+      memberType: isCouple ? "couple" : "individual",
+      partnerName: isCouple && data.partnerName ? data.partnerName.trim() : null,
+      partnerPhone: isCouple && data.partnerPhone ? data.partnerPhone.trim() : null,
+      partnerMemberNumber: isCouple && data.partnerMemberNumber ? data.partnerMemberNumber.trim() : null,
       barcode,
       status: "active",
       createdAt: /* @__PURE__ */ new Date(),
@@ -1486,6 +1528,14 @@ var GymService = class {
       startDate: data.startDate,
       expiryDate,
       status: "active",
+      membershipAmount: serverMembershipAmount,
+      admissionFee: serverAdmissionFee,
+      totalAmount: serverTotalAmount,
+      admissionFeeApplied: isAdmissionApplied,
+      memberType: isCouple ? "couple" : "individual",
+      partnerName: isCouple && data.partnerName ? data.partnerName.trim() : null,
+      partnerPhone: isCouple && data.partnerPhone ? data.partnerPhone.trim() : null,
+      partnerMemberNumber: isCouple && data.partnerMemberNumber ? data.partnerMemberNumber.trim() : null,
       createdAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
     };
@@ -1495,33 +1545,94 @@ var GymService = class {
       gymId,
       memberId,
       memberNumber,
-      amount: data.paymentAmount,
+      amount: serverTotalAmount,
+      membershipAmount: serverMembershipAmount,
+      admissionFee: serverAdmissionFee,
+      totalAmount: serverTotalAmount,
+      admissionFeeApplied: isAdmissionApplied,
+      memberType: isCouple ? "couple" : "individual",
+      partnerName: isCouple && data.partnerName ? data.partnerName.trim() : null,
+      partnerPhone: isCouple && data.partnerPhone ? data.partnerPhone.trim() : null,
       paymentDate: data.startDate,
       package: data.package,
       paymentMethod: data.paymentMethod,
+      previousExpiryDate: null,
       newExpiryDate: expiryDate,
       createdBy: data.createdBy || "admin",
-      notes: "Initial Membership Registration",
+      notes: isCouple ? `Couple Registration (${data.fullName}${data.partnerName ? " & " + data.partnerName : ""})` : "Initial Membership Registration",
       createdAt: /* @__PURE__ */ new Date()
     };
     if (db) {
       await db.collection("members").insertOne(newMemberDoc);
       await db.collection("memberships").insertOne(newMembershipDoc);
-      if (data.paymentAmount > 0) {
+      if (serverTotalAmount > 0) {
         await db.collection("payments").insertOne(newPaymentDoc);
       }
     } else {
       mem.members.unshift(newMemberDoc);
       mem.memberships.unshift(newMembershipDoc);
-      if (data.paymentAmount > 0) {
+      if (serverTotalAmount > 0) {
         mem.payments.unshift(newPaymentDoc);
       }
     }
+    let partnerMemberDoc = null;
+    if (isCouple && data.partnerName && data.partnerName.trim()) {
+      const partnerNum = data.partnerMemberNumber && data.partnerMemberNumber.trim() ? data.partnerMemberNumber.trim() : `${cleanNum}-P`;
+      const partnerBarcode = `BC-${partnerNum.replace(/[^A-Za-z0-9]/g, "") || Math.floor(1e5 + Math.random() * 9e5)}`;
+      partnerMemberDoc = {
+        id: memberId + 10,
+        businessId,
+        gymId,
+        memberNumber: partnerNum,
+        fullName: data.partnerName.trim(),
+        phone: data.partnerPhone ? data.partnerPhone.trim() : data.phone.trim(),
+        email: null,
+        address: data.address ? data.address.trim() : null,
+        emergencyContact: `${data.fullName.trim()} (${data.phone.trim()})`,
+        notes: `Couple Partner with ${data.fullName.trim()} (${memberNumber})`,
+        memberType: "couple",
+        partnerName: data.fullName.trim(),
+        partnerPhone: data.phone.trim(),
+        partnerMemberNumber: memberNumber,
+        barcode: partnerBarcode,
+        status: "active",
+        createdAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      const partnerMembershipDoc = {
+        id: Date.now() + 11,
+        businessId,
+        gymId,
+        memberId: partnerMemberDoc.id,
+        package: data.package,
+        startDate: data.startDate,
+        expiryDate,
+        status: "active",
+        membershipAmount: 0,
+        admissionFee: 0,
+        totalAmount: 0,
+        admissionFeeApplied: false,
+        memberType: "couple",
+        partnerName: data.fullName.trim(),
+        partnerPhone: data.phone.trim(),
+        partnerMemberNumber: memberNumber,
+        createdAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      if (db) {
+        await db.collection("members").insertOne(partnerMemberDoc);
+        await db.collection("memberships").insertOne(partnerMembershipDoc);
+      } else {
+        mem.members.unshift(partnerMemberDoc);
+        mem.memberships.unshift(partnerMembershipDoc);
+      }
+    }
     try {
-      const gymDetails = await this.getGymDetails(businessId);
       const gymName = gymDetails?.gymName || "Gym Management";
       const cleanPkg = data.package.replace(/_/g, " ").toUpperCase();
-      const welcomeMsg = "Welcome to " + gymName + ", " + data.fullName + "! Your " + cleanPkg + " membership is active until " + expiryDate + ". Payment received: Rs. " + data.paymentAmount.toLocaleString() + ". Member ID: " + memberNumber + ".";
+      const curr = gymDetails?.currency || "Rs.";
+      const feeNote = isAdmissionApplied ? ` (incl. Admission Fee: ${curr} ${serverAdmissionFee.toLocaleString()})` : "";
+      const welcomeMsg = "Welcome to " + gymName + ", " + data.fullName + "! Your " + (isCouple ? "COUPLE " : "") + cleanPkg + " membership is active until " + expiryDate + ". Payment received: " + curr + " " + serverTotalAmount.toLocaleString() + feeNote + ". Member ID: " + memberNumber + ".";
       await sendSms({
         gymId,
         memberId,
@@ -1533,7 +1644,14 @@ var GymService = class {
       console.warn("Non-blocking welcome SMS dispatch notice:", smsErr?.message || smsErr);
     }
     const fullMember = await this.getMemberById(memberId, businessId);
-    return fullMember || newMemberDoc;
+    return {
+      ...fullMember || newMemberDoc,
+      latestMembership: newMembershipDoc,
+      latestPayment: newPaymentDoc,
+      membership: newMembershipDoc,
+      payment: newPaymentDoc,
+      partnerMember: partnerMemberDoc
+    };
   }
   static async updateMember(id, data, gymIdOrBusinessId) {
     await ensureMongoSeeded();
@@ -1625,6 +1743,30 @@ var GymService = class {
       exp.setMonth(exp.getMonth() + 1);
     }
     const expiryDate = formatDateStr(exp);
+    const gymDetails = await this.getGymDetails(businessId);
+    const tenantAdmissionFee = Number(gymDetails?.admissionFee ?? (businessId === "biz_2" ? 1500 : businessId === "biz_3" ? 25 : 1e3));
+    const isAdmissionApplied = Boolean(data.addAdmissionFee || data.admissionFeeApplied);
+    const serverAdmissionFee = isAdmissionApplied ? tenantAdmissionFee : 0;
+    const isCouple = (data.memberType || member.memberType) === "couple";
+    let serverMembershipAmount = 0;
+    if (data.membershipAmount !== void 0 && Number(data.membershipAmount) >= 0) {
+      serverMembershipAmount = Number(data.membershipAmount);
+    } else if (data.paymentAmount !== void 0) {
+      serverMembershipAmount = isAdmissionApplied ? Math.max(0, Number(data.paymentAmount) - serverAdmissionFee) : Number(data.paymentAmount);
+    } else {
+      if (isCouple) {
+        if (data.package === "3_months") serverMembershipAmount = gymDetails?.coupleThreeMonthsPrice || 2e4;
+        else if (data.package === "6_months") serverMembershipAmount = gymDetails?.coupleSixMonthsPrice || 36e3;
+        else if (data.package === "annual") serverMembershipAmount = gymDetails?.coupleAnnualPrice || 65e3;
+        else serverMembershipAmount = gymDetails?.coupleMonthlyPrice || 8e3;
+      } else {
+        if (data.package === "3_months") serverMembershipAmount = gymDetails?.threeMonthsPrice || 12e3;
+        else if (data.package === "6_months") serverMembershipAmount = gymDetails?.sixMonthsPrice || 22e3;
+        else if (data.package === "annual") serverMembershipAmount = gymDetails?.annualPrice || 38e3;
+        else serverMembershipAmount = gymDetails?.monthlyPrice || 4500;
+      }
+    }
+    const serverTotalAmount = serverMembershipAmount + serverAdmissionFee;
     const membershipDoc = {
       id: Date.now(),
       businessId,
@@ -1634,6 +1776,14 @@ var GymService = class {
       startDate: data.startDate,
       expiryDate,
       status: "active",
+      membershipAmount: serverMembershipAmount,
+      admissionFee: serverAdmissionFee,
+      totalAmount: serverTotalAmount,
+      admissionFeeApplied: isAdmissionApplied,
+      memberType: isCouple ? "couple" : "individual",
+      partnerName: member.partnerName || null,
+      partnerPhone: member.partnerPhone || null,
+      partnerMemberNumber: member.partnerMemberNumber || null,
       createdAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
     };
@@ -1643,37 +1793,96 @@ var GymService = class {
       gymId,
       memberId: data.memberId,
       memberNumber: member.memberNumber,
-      amount: data.paymentAmount,
+      amount: serverTotalAmount,
+      membershipAmount: serverMembershipAmount,
+      admissionFee: serverAdmissionFee,
+      totalAmount: serverTotalAmount,
+      admissionFeeApplied: isAdmissionApplied,
+      memberType: isCouple ? "couple" : "individual",
+      partnerName: member.partnerName || null,
+      partnerPhone: member.partnerPhone || null,
       paymentDate: data.startDate,
       package: data.package,
       paymentMethod: data.paymentMethod,
       previousExpiryDate: member.latestMembership?.expiryDate || null,
       newExpiryDate: expiryDate,
       createdBy: data.createdBy || "admin",
-      notes: data.notes || "Membership Renewal",
+      notes: data.notes || (isCouple ? "Couple Membership Renewal" : "Membership Renewal"),
       createdAt: /* @__PURE__ */ new Date()
     };
     if (db) {
       await db.collection("memberships").insertOne(membershipDoc);
-      if (data.paymentAmount > 0) {
+      if (serverTotalAmount > 0) {
         await db.collection("payments").insertOne(paymentDoc);
       }
       await db.collection("members").updateOne({ id: data.memberId, businessId }, { $set: { status: "active", updatedAt: /* @__PURE__ */ new Date() } });
+      if (isCouple && member.partnerMemberNumber) {
+        const partner = await db.collection("members").findOne({ businessId, memberNumber: member.partnerMemberNumber });
+        if (partner) {
+          await db.collection("memberships").insertOne({
+            id: Date.now() + 2,
+            businessId,
+            gymId,
+            memberId: partner.id,
+            package: data.package,
+            startDate: data.startDate,
+            expiryDate,
+            status: "active",
+            membershipAmount: 0,
+            admissionFee: 0,
+            totalAmount: 0,
+            admissionFeeApplied: false,
+            memberType: "couple",
+            partnerName: member.fullName,
+            partnerPhone: member.phone,
+            partnerMemberNumber: member.memberNumber,
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+          await db.collection("members").updateOne({ id: partner.id, businessId }, { $set: { status: "active", updatedAt: /* @__PURE__ */ new Date() } });
+        }
+      }
     } else {
       mem.memberships.unshift(membershipDoc);
-      if (data.paymentAmount > 0) {
+      if (serverTotalAmount > 0) {
         mem.payments.unshift(paymentDoc);
       }
       const mIdx = mem.members.findIndex((m) => m.id === data.memberId);
       if (mIdx !== -1) {
         mem.members[mIdx].status = "active";
       }
+      if (isCouple && member.partnerMemberNumber) {
+        const partner = mem.members.find((m) => m.businessId === businessId && m.memberNumber === member.partnerMemberNumber);
+        if (partner) {
+          partner.status = "active";
+          mem.memberships.unshift({
+            id: Date.now() + 2,
+            businessId,
+            gymId,
+            memberId: partner.id,
+            package: data.package,
+            startDate: data.startDate,
+            expiryDate,
+            status: "active",
+            membershipAmount: 0,
+            admissionFee: 0,
+            totalAmount: 0,
+            admissionFeeApplied: false,
+            memberType: "couple",
+            partnerName: member.fullName,
+            partnerPhone: member.phone,
+            partnerMemberNumber: member.memberNumber,
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+        }
+      }
     }
     try {
-      const gymDetails = await this.getGymDetails(businessId);
-      const gymName = gymDetails?.gymName || "Gym Management";
       const cleanPkg = data.package.replace(/_/g, " ").toUpperCase();
-      const renewMsg = "Payment Received: Rs. " + data.paymentAmount.toLocaleString() + " for " + member.fullName + ". Your " + cleanPkg + " membership at " + gymName + " is renewed until " + expiryDate + ".";
+      const curr = gymDetails?.currency || "Rs.";
+      const feeNote = isAdmissionApplied ? ` (incl. Admission Fee: ${curr} ${serverAdmissionFee.toLocaleString()})` : "";
+      const renewMsg = "Payment Received: " + curr + " " + serverTotalAmount.toLocaleString() + feeNote + " for " + member.fullName + ". Your " + (isCouple ? "COUPLE " : "") + cleanPkg + " membership at " + (gymDetails?.gymName || "Gym Management") + " is renewed until " + expiryDate + ".";
       await sendSms({
         gymId,
         memberId: data.memberId,
@@ -1684,7 +1893,17 @@ var GymService = class {
     } catch (smsErr) {
       console.warn("Non-blocking renewal SMS dispatch notice:", smsErr?.message || smsErr);
     }
-    return { membership: membershipDoc, payment: paymentDoc };
+    const updatedMember = await this.getMemberById(data.memberId, businessId);
+    return {
+      success: true,
+      member: {
+        ...updatedMember || member,
+        latestMembership: membershipDoc,
+        latestPayment: paymentDoc
+      },
+      membership: membershipDoc,
+      payment: paymentDoc
+    };
   }
   // =========================================================================
   // 3. ATTENDANCE SCANNER
@@ -2284,6 +2503,11 @@ var GymService = class {
       threeMonthsPrice: doc.threeMonthsPrice || 12e3,
       sixMonthsPrice: doc.sixMonthsPrice || 22e3,
       annualPrice: doc.annualPrice || 38e3,
+      admissionFee: doc.admissionFee !== void 0 ? Number(doc.admissionFee) : businessId === "biz_2" ? 1500 : businessId === "biz_3" ? 25 : 1e3,
+      coupleMonthlyPrice: doc.coupleMonthlyPrice !== void 0 ? Number(doc.coupleMonthlyPrice) : businessId === "biz_2" ? 9e3 : businessId === "biz_3" ? 110 : 8e3,
+      coupleThreeMonthsPrice: doc.coupleThreeMonthsPrice !== void 0 ? Number(doc.coupleThreeMonthsPrice) : businessId === "biz_2" ? 23e3 : businessId === "biz_3" ? 300 : 2e4,
+      coupleSixMonthsPrice: doc.coupleSixMonthsPrice !== void 0 ? Number(doc.coupleSixMonthsPrice) : businessId === "biz_2" ? 42e3 : businessId === "biz_3" ? 550 : 36e3,
+      coupleAnnualPrice: doc.coupleAnnualPrice !== void 0 ? Number(doc.coupleAnnualPrice) : businessId === "biz_2" ? 72e3 : businessId === "biz_3" ? 950 : 65e3,
       currency: doc.currency || "Rs.",
       timezone: doc.timezone || "Asia/Colombo",
       receiptFooter: doc.receiptFooter || "Thank you for training with us!"
@@ -2307,6 +2531,11 @@ var GymService = class {
     if (data.threeMonthsPrice !== void 0) updates.threeMonthsPrice = Math.round(Number(data.threeMonthsPrice));
     if (data.sixMonthsPrice !== void 0) updates.sixMonthsPrice = Math.round(Number(data.sixMonthsPrice));
     if (data.annualPrice !== void 0) updates.annualPrice = Math.round(Number(data.annualPrice));
+    if (data.admissionFee !== void 0) updates.admissionFee = Math.max(0, Math.round(Number(data.admissionFee)));
+    if (data.coupleMonthlyPrice !== void 0) updates.coupleMonthlyPrice = Math.round(Number(data.coupleMonthlyPrice));
+    if (data.coupleThreeMonthsPrice !== void 0) updates.coupleThreeMonthsPrice = Math.round(Number(data.coupleThreeMonthsPrice));
+    if (data.coupleSixMonthsPrice !== void 0) updates.coupleSixMonthsPrice = Math.round(Number(data.coupleSixMonthsPrice));
+    if (data.coupleAnnualPrice !== void 0) updates.coupleAnnualPrice = Math.round(Number(data.coupleAnnualPrice));
     if (db) {
       await db.collection("businesses").updateOne(
         { businessId },
@@ -2338,6 +2567,15 @@ var GymService = class {
     }
     if (updates.logo) settingsMap["logo"] = updates.logo;
     if (updates.receiptFooter) settingsMap["receipt_footer"] = updates.receiptFooter;
+    if (updates.monthlyPrice !== void 0) settingsMap["monthly_price"] = String(updates.monthlyPrice);
+    if (updates.threeMonthsPrice !== void 0) settingsMap["three_months_price"] = String(updates.threeMonthsPrice);
+    if (updates.sixMonthsPrice !== void 0) settingsMap["six_months_price"] = String(updates.sixMonthsPrice);
+    if (updates.annualPrice !== void 0) settingsMap["annual_price"] = String(updates.annualPrice);
+    if (updates.admissionFee !== void 0) settingsMap["admission_fee"] = String(updates.admissionFee);
+    if (updates.coupleMonthlyPrice !== void 0) settingsMap["couple_monthly_price"] = String(updates.coupleMonthlyPrice);
+    if (updates.coupleThreeMonthsPrice !== void 0) settingsMap["couple_three_months_price"] = String(updates.coupleThreeMonthsPrice);
+    if (updates.coupleSixMonthsPrice !== void 0) settingsMap["couple_six_months_price"] = String(updates.coupleSixMonthsPrice);
+    if (updates.coupleAnnualPrice !== void 0) settingsMap["couple_annual_price"] = String(updates.coupleAnnualPrice);
     await this.updateSettings(businessId, settingsMap);
     const updated = await this.getGymDetails(businessId);
     return updated;
@@ -3350,11 +3588,19 @@ app.post("/api/members", requireAuth, requireGymTenant, async (req, res) => {
       membershipPackage,
       paymentDate,
       paymentAmount,
+      membershipAmount,
+      addAdmissionFee,
+      admissionFeeApplied,
+      memberType,
+      partnerName,
+      partnerPhone,
+      partnerMemberNumber,
+      registerPartnerMember,
       paymentMethod,
       emergencyContact,
       notes
     } = req.body || {};
-    if (!memberNumber || !fullName || !phone || !membershipPackage || !paymentDate || paymentAmount === void 0) {
+    if (!memberNumber || !fullName || !phone || !membershipPackage || !paymentDate || paymentAmount === void 0 && membershipAmount === void 0) {
       return res.status(400).json({ error: "Missing required member fields (Member Number, Full Name, Phone, Package, Payment Date, Payment Amount)." });
     }
     const created = await GymService.createMember({
@@ -3367,7 +3613,15 @@ app.post("/api/members", requireAuth, requireGymTenant, async (req, res) => {
       address,
       package: membershipPackage,
       startDate: paymentDate,
-      paymentAmount: Number(paymentAmount),
+      paymentAmount: paymentAmount !== void 0 ? Number(paymentAmount) : void 0,
+      membershipAmount: membershipAmount !== void 0 ? Number(membershipAmount) : void 0,
+      addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
+      admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
+      memberType: memberType === "couple" ? "couple" : "individual",
+      partnerName: memberType === "couple" ? partnerName : void 0,
+      partnerPhone: memberType === "couple" ? partnerPhone : void 0,
+      partnerMemberNumber: memberType === "couple" ? partnerMemberNumber : void 0,
+      registerPartnerMember: memberType === "couple" ? Boolean(registerPartnerMember) : false,
       paymentMethod: paymentMethod || "cash",
       emergencyContact,
       notes,
@@ -3454,8 +3708,18 @@ app.post("/api/members/:id/renew", requireAuth, requireGymTenant, async (req, re
     const businessId = req.businessId || resolveBusinessId(req.gymId);
     const gymId = req.gymId || resolveGymId(businessId);
     const id = Number(req.params.id);
-    const { package: pkg, startDate, paymentAmount, paymentMethod, notes } = req.body;
-    if (!pkg || !startDate || paymentAmount === void 0) {
+    const {
+      package: pkg,
+      startDate,
+      paymentAmount,
+      membershipAmount,
+      addAdmissionFee,
+      admissionFeeApplied,
+      memberType,
+      paymentMethod,
+      notes
+    } = req.body || {};
+    if (!pkg || !startDate || paymentAmount === void 0 && membershipAmount === void 0) {
       return res.status(400).json({ error: "Package, start date, and payment amount are required." });
     }
     const updatedMember = await GymService.renewMembership(
@@ -3465,7 +3729,11 @@ app.post("/api/members/:id/renew", requireAuth, requireGymTenant, async (req, re
         businessId,
         package: pkg,
         startDate,
-        paymentAmount: Number(paymentAmount),
+        paymentAmount: paymentAmount !== void 0 ? Number(paymentAmount) : void 0,
+        membershipAmount: membershipAmount !== void 0 ? Number(membershipAmount) : void 0,
+        addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
+        admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
+        memberType,
         paymentMethod: paymentMethod || "cash",
         notes,
         createdBy: req.user?.name || "Admin"
@@ -3733,6 +4001,11 @@ app.get("/api/settings", requireAuth, requireGymTenant, async (req, res) => {
       map["three_months_price"] = String(gymDetails.threeMonthsPrice || 12e3);
       map["six_months_price"] = String(gymDetails.sixMonthsPrice || 22e3);
       map["annual_price"] = String(gymDetails.annualPrice || 38e3);
+      map["admission_fee"] = String(gymDetails.admissionFee !== void 0 ? gymDetails.admissionFee : businessId === "biz_2" ? 1500 : businessId === "biz_3" ? 25 : 1e3);
+      map["couple_monthly_price"] = String(gymDetails.coupleMonthlyPrice || 8e3);
+      map["couple_three_months_price"] = String(gymDetails.coupleThreeMonthsPrice || 2e4);
+      map["couple_six_months_price"] = String(gymDetails.coupleSixMonthsPrice || 36e3);
+      map["couple_annual_price"] = String(gymDetails.coupleAnnualPrice || 65e3);
     }
     res.json(map);
   } catch (err) {
@@ -3757,10 +4030,15 @@ app.put("/api/settings", requireAuth, requireGymTenant, requireRoles("SUPER_ADMI
       smsApiKey: updates["sms_api_key"],
       smsSenderId: updates["sms_sender_id"],
       smsEnabled: updates["sms_enabled"],
-      monthlyPrice: updates["monthly_price"] ? Number(updates["monthly_price"]) : void 0,
-      threeMonthsPrice: updates["three_months_price"] ? Number(updates["three_months_price"]) : void 0,
-      sixMonthsPrice: updates["six_months_price"] ? Number(updates["six_months_price"]) : void 0,
-      annualPrice: updates["annual_price"] ? Number(updates["annual_price"]) : void 0
+      monthlyPrice: updates["monthly_price"] !== void 0 ? Number(updates["monthly_price"]) : void 0,
+      threeMonthsPrice: updates["three_months_price"] !== void 0 ? Number(updates["three_months_price"]) : void 0,
+      sixMonthsPrice: updates["six_months_price"] !== void 0 ? Number(updates["six_months_price"]) : void 0,
+      annualPrice: updates["annual_price"] !== void 0 ? Number(updates["annual_price"]) : void 0,
+      admissionFee: updates["admission_fee"] !== void 0 ? Number(updates["admission_fee"]) : void 0,
+      coupleMonthlyPrice: updates["couple_monthly_price"] !== void 0 ? Number(updates["couple_monthly_price"]) : void 0,
+      coupleThreeMonthsPrice: updates["couple_three_months_price"] !== void 0 ? Number(updates["couple_three_months_price"]) : void 0,
+      coupleSixMonthsPrice: updates["couple_six_months_price"] !== void 0 ? Number(updates["couple_six_months_price"]) : void 0,
+      coupleAnnualPrice: updates["couple_annual_price"] !== void 0 ? Number(updates["couple_annual_price"]) : void 0
     });
     res.json({ success: true, message: "Settings saved successfully", gym: updatedGym });
   } catch (err) {

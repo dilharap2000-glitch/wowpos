@@ -1278,28 +1278,28 @@ export class GymService {
     // Read tenant settings, calculate admission fee & total server-side
     const gymDetails = await this.getGymDetails(businessId);
     const tenantAdmissionFee = Number(gymDetails?.admissionFee ?? (businessId === 'biz_2' ? 1500 : businessId === 'biz_3' ? 25 : 1000));
-    const isAdmissionApplied = Boolean(data.addAdmissionFee || data.admissionFeeApplied);
-    const serverAdmissionFee = isAdmissionApplied ? tenantAdmissionFee : 0;
     const isCouple = data.memberType === 'couple';
 
+    // Server-side package validation and pricing determination independently
+    const validPackages = ['monthly', '3_months', '6_months', 'annual'];
+    const selectedPackage = validPackages.includes(data.package) ? data.package : 'monthly';
+
     let serverMembershipAmount = 0;
-    if (data.membershipAmount !== undefined && Number(data.membershipAmount) >= 0) {
-      serverMembershipAmount = Number(data.membershipAmount);
-    } else if (data.paymentAmount !== undefined) {
-      serverMembershipAmount = isAdmissionApplied ? Math.max(0, Number(data.paymentAmount) - serverAdmissionFee) : Number(data.paymentAmount);
+    if (isCouple) {
+      if (selectedPackage === '3_months') serverMembershipAmount = Number(gymDetails?.coupleThreeMonthsPrice) || 20000;
+      else if (selectedPackage === '6_months') serverMembershipAmount = Number(gymDetails?.coupleSixMonthsPrice) || 36000;
+      else if (selectedPackage === 'annual') serverMembershipAmount = Number(gymDetails?.coupleAnnualPrice) || 65000;
+      else serverMembershipAmount = Number(gymDetails?.coupleMonthlyPrice) || 8000;
     } else {
-      if (isCouple) {
-        if (data.package === '3_months') serverMembershipAmount = gymDetails?.coupleThreeMonthsPrice || 20000;
-        else if (data.package === '6_months') serverMembershipAmount = gymDetails?.coupleSixMonthsPrice || 36000;
-        else if (data.package === 'annual') serverMembershipAmount = gymDetails?.coupleAnnualPrice || 65000;
-        else serverMembershipAmount = gymDetails?.coupleMonthlyPrice || 8000;
-      } else {
-        if (data.package === '3_months') serverMembershipAmount = gymDetails?.threeMonthsPrice || 12000;
-        else if (data.package === '6_months') serverMembershipAmount = gymDetails?.sixMonthsPrice || 22000;
-        else if (data.package === 'annual') serverMembershipAmount = gymDetails?.annualPrice || 38000;
-        else serverMembershipAmount = gymDetails?.monthlyPrice || 4500;
-      }
+      if (selectedPackage === '3_months') serverMembershipAmount = Number(gymDetails?.threeMonthsPrice) || 12000;
+      else if (selectedPackage === '6_months') serverMembershipAmount = Number(gymDetails?.sixMonthsPrice) || 22000;
+      else if (selectedPackage === 'annual') serverMembershipAmount = Number(gymDetails?.annualPrice) || 38000;
+      else serverMembershipAmount = Number(gymDetails?.monthlyPrice) || 4500;
     }
+
+    // Server-side admission fee calculation (strictly optional, never forced)
+    const isAdmissionApplied = Boolean(data.addAdmissionFee || data.admissionFeeApplied);
+    const serverAdmissionFee = isAdmissionApplied ? tenantAdmissionFee : 0;
     const serverTotalAmount = serverMembershipAmount + serverAdmissionFee;
 
     const memberId = Date.now();

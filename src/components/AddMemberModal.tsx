@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, UserPlus, CreditCard, Phone, User, Users, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { X, UserPlus, CreditCard, User, Users, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { getColomboToday, calculateExpiryDate, sanitizeDateString } from '../lib/date-utils.ts';
 import { api } from '../lib/api.ts';
 import { useBusiness } from '../context/BusinessContext.tsx';
@@ -42,10 +42,10 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
     return 1000;
   }, [business.admissionFee]);
 
-  // Member Type: individual | couple
+  // 1. Membership Type State: Default is 'individual'
   const [memberType, setMemberType] = useState<'individual' | 'couple'>('individual');
 
-  // Primary Member Fields
+  // Primary Member Identity Fields
   const [memberNumber, setMemberNumber] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
@@ -53,23 +53,18 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   const [address, setAddress] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
 
-  // Partner Fields (for Couple Membership)
+  // Partner Fields (ONLY for Couple Membership)
   const [partnerName, setPartnerName] = useState('');
   const [partnerPhone, setPartnerPhone] = useState('');
   const [partnerMemberNumber, setPartnerMemberNumber] = useState('');
 
-  // Membership & Payment Package
+  // Package & Payment Selection
   const [membershipPackage, setMembershipPackage] = useState<'monthly' | '3_months' | '6_months' | 'annual'>('monthly');
   const [paymentDate, setPaymentDate] = useState(getColomboToday());
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer' | 'card'>('cash');
   const [notes, setNotes] = useState('');
 
-  // CRITICAL REQUIREMENT:
-  // [ ] ADD ADMISSION FEE checkbox
-  // Available for BOTH Individual and Couple membership
-  // DEFAULT STATE: UNCHECKED (false)
-  // When unchecked: Admission Fee = Rs. 0, do NOT add to total
-  // When checked: Load current tenant's Admission Fee from Gym Settings and add to total
+  // Optional Admission Fee (Default: UNCHECKED, Rs. 0)
   const [addAdmissionFee, setAddAdmissionFee] = useState<boolean>(false);
 
   const [loading, setLoading] = useState(false);
@@ -78,27 +73,47 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   // Dynamic preview of expiry date
   const calculatedExpiry = calculateExpiryDate(paymentDate, membershipPackage);
 
-  // Active package price based on memberType
+  // Active package price based on current membership type
   const activePackagePrice = useMemo(() => {
     const table = memberType === 'couple' ? couplePrices : individualPrices;
     return table[membershipPackage] || 0;
   }, [memberType, couplePrices, individualPrices, membershipPackage]);
 
-  // Calculated Admission Fee (0 if unchecked, tenant's admission fee if checked)
+  // Admission Fee amount (0 if unchecked, tenant's admission fee if checked)
   const currentAdmissionFee = addAdmissionFee ? tenantAdmissionFee : 0;
 
-  // Total Payment Amount: Package Price + Admission Fee (server-calculated as well)
+  // Total Payment Amount: Package Price + Admission Fee
   const totalAmount = activePackagePrice + currentAdmissionFee;
 
+  // Reset modal state upon open
   useEffect(() => {
     if (isOpen) {
       refreshBusiness();
+      setMemberType('individual');
+      setMembershipPackage('monthly');
+      setAddAdmissionFee(false);
+      setPartnerName('');
+      setPartnerPhone('');
+      setPartnerMemberNumber('');
       setPaymentDate(getColomboToday());
       setError(null);
-      // Ensure default state is strictly UNCHECKED
-      setAddAdmissionFee(false);
     }
   }, [isOpen, refreshBusiness]);
+
+  // Seamless switching between INDIVIDUAL and COUPLE with complete state cleanup
+  const handleSelectMemberType = (newType: 'individual' | 'couple') => {
+    if (newType === memberType) return;
+    setMemberType(newType);
+    // Reset package selection to default monthly
+    setMembershipPackage('monthly');
+    // Reset admission fee to unchecked
+    setAddAdmissionFee(false);
+    // Strictly clear couple partner data when switching
+    setPartnerName('');
+    setPartnerPhone('');
+    setPartnerMemberNumber('');
+    setError(null);
+  };
 
   if (!isOpen) return null;
 
@@ -126,6 +141,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
 
     setLoading(true);
     try {
+      const isCouple = memberType === 'couple';
       const result = await api.addMember({
         memberNumber: memberNumber.trim().toUpperCase(),
         fullName: fullName.trim(),
@@ -135,12 +151,12 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
         emergencyContact: emergencyContact.trim() || undefined,
         membershipPackage,
         paymentDate,
-        // Send pricing details & optional admission fee selection
         memberType,
-        partnerName: memberType === 'couple' ? partnerName.trim() : undefined,
-        partnerPhone: memberType === 'couple' ? (partnerPhone.trim() || phone.trim()) : undefined,
-        partnerMemberNumber: memberType === 'couple' && partnerMemberNumber.trim() ? partnerMemberNumber.trim().toUpperCase() : undefined,
-        registerPartnerMember: memberType === 'couple',
+        // Strictly sanitize: never submit stale partner data if Individual is selected
+        partnerName: isCouple && partnerName.trim() ? partnerName.trim() : undefined,
+        partnerPhone: isCouple ? (partnerPhone.trim() || phone.trim()) : undefined,
+        partnerMemberNumber: isCouple && partnerMemberNumber.trim() ? partnerMemberNumber.trim().toUpperCase() : undefined,
+        registerPartnerMember: isCouple,
         addAdmissionFee,
         admissionFeeApplied: addAdmissionFee,
         membershipAmount: activePackagePrice,
@@ -164,7 +180,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
         id="add-member-modal"
         className="bg-[#121212] border border-white/10 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl my-8"
       >
-        {/* Header */}
+        {/* Modal Header */}
         <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-[#FACC15] flex items-center justify-center text-black shadow-md shadow-[#FACC15]/20">
@@ -181,13 +197,13 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2.5 rounded-2xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+            className="p-2.5 rounded-2xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Form Body */}
+        {/* Modal Body */}
         <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6">
           {error && (
             <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-2">
@@ -196,47 +212,11 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             </div>
           )}
 
-          {/* Membership Type Selector: Individual vs Couple */}
-          <div className="p-4 rounded-2xl bg-black/40 border border-white/10">
-            <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-2">
-              Membership Type *
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                id="btn-select-individual-membership"
-                onClick={() => setMemberType('individual')}
-                className={`py-3 px-4 rounded-xl border font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
-                  memberType === 'individual'
-                    ? 'bg-[#FACC15] text-black border-[#FACC15] shadow-md shadow-[#FACC15]/20'
-                    : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
-                }`}
-              >
-                <User className="w-4 h-4" />
-                <span>Individual</span>
-              </button>
-
-              <button
-                type="button"
-                id="btn-select-couple-membership"
-                onClick={() => setMemberType('couple')}
-                className={`py-3 px-4 rounded-xl border font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
-                  memberType === 'couple'
-                    ? 'bg-[#FACC15] text-black border-[#FACC15] shadow-md shadow-[#FACC15]/20'
-                    : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Couple Package</span>
-              </button>
-            </div>
-          </div>
-
           {/* Section 1: Member Identity */}
           <div className="space-y-4">
             <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
               <User className="w-3.5 h-3.5" />
-              1. {memberType === 'couple' ? 'Primary Member Information' : 'Member Information'}
+              1. Member Information
             </h4>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -302,79 +282,130 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             </div>
           </div>
 
-          {/* Section 1.5: Couple Partner Details (Only shown if Couple selected) */}
-          {memberType === 'couple' && (
-            <div className="space-y-4 pt-4 border-t border-white/5">
-              <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
-                <Users className="w-3.5 h-3.5" />
-                Partner Details (Included in Couple Package)
-              </h4>
+          {/* Section 2: Membership Package & Type */}
+          <div className="space-y-5 pt-4 border-t border-white/5">
+            <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
+              <CreditCard className="w-3.5 h-3.5" />
+              2. Membership Type & Package
+            </h4>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* ============================================================= */}
+            {/* REQUIRED FEATURE: CLEAR MEMBERSHIP TYPE SELECTOR              */}
+            {/* Always visible, always clickable, seamless free switching.     */}
+            {/* Default: INDIVIDUAL. Highlighted with WOW POS yellow/gold.    */}
+            {/* ============================================================= */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
+                  MEMBERSHIP TYPE *
+                </label>
+                <span className="text-[10px] text-gray-400 font-mono">
+                  Currently Selected: <strong className="text-[#FACC15] uppercase">{memberType}</strong>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 p-1.5 bg-black/60 border border-white/10 rounded-2xl">
+                <button
+                  type="button"
+                  id="btn-membership-type-individual"
+                  onClick={() => handleSelectMemberType('individual')}
+                  className={`py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer select-none active:scale-95 ${
+                    memberType === 'individual'
+                      ? 'bg-[#FACC15] text-black shadow-lg shadow-[#FACC15]/25 border-2 border-[#FACC15]'
+                      : 'bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border-2 border-transparent'
+                  }`}
+                >
+                  <User className="w-4 h-4" />
+                  <span>INDIVIDUAL</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-membership-type-couple"
+                  onClick={() => handleSelectMemberType('couple')}
+                  className={`py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer select-none active:scale-95 ${
+                    memberType === 'couple'
+                      ? 'bg-[#FACC15] text-black shadow-lg shadow-[#FACC15]/25 border-2 border-[#FACC15]'
+                      : 'bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border-2 border-transparent'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>COUPLE</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Couple-Specific Partner Fields (Only visible when COUPLE is selected) */}
+            {memberType === 'couple' && (
+              <div className="space-y-4 p-4 bg-[#FACC15]/5 border border-[#FACC15]/20 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <h5 className="text-[11px] font-black text-[#FACC15] uppercase tracking-wider flex items-center gap-2">
+                    <Users className="w-3.5 h-3.5" />
+                    Couple Partner Information
+                  </h5>
+                  <span className="text-[9px] text-gray-400 uppercase font-mono">
+                    Included in Couple Package
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1">
+                      Partner Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Amanda Perera"
+                      value={partnerName}
+                      onChange={(e) => setPartnerName(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-xs font-semibold focus:border-[#FACC15] focus:outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1">
+                      Partner Phone (Optional)
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder={phone ? `Defaults to ${phone}` : 'e.g. 0779876543'}
+                      value={partnerPhone}
+                      onChange={(e) => setPartnerPhone(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-[#FACC15] focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
-                    Partner Full Name *
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1">
+                    Partner Member Number (Optional)
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="e.g. Amanda Perera"
-                    value={partnerName}
-                    onChange={(e) => setPartnerName(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm font-semibold focus:border-[#FACC15] focus:outline-hidden"
+                    placeholder={memberNumber ? `Defaults to ${memberNumber}-P` : 'e.g. M-1001-P'}
+                    value={partnerMemberNumber}
+                    onChange={(e) => setPartnerMemberNumber(e.target.value.toUpperCase())}
+                    className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs uppercase focus:border-[#FACC15] focus:outline-hidden"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
-                    Partner Phone (Optional)
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder={phone ? `Defaults to ${phone}` : 'e.g. 0779876543'}
-                    value={partnerPhone}
-                    onChange={(e) => setPartnerPhone(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-white font-mono text-sm focus:border-[#FACC15] focus:outline-hidden"
-                  />
+                  <span className="text-[9px] text-gray-400 mt-1 block">
+                    A distinct member pass & barcode is automatically generated for the partner
+                  </span>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
-                  Partner Member Number (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder={memberNumber ? `Defaults to ${memberNumber}-P` : 'e.g. M-1001-P'}
-                  value={partnerMemberNumber}
-                  onChange={(e) => setPartnerMemberNumber(e.target.value.toUpperCase())}
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-white font-mono text-sm uppercase focus:border-[#FACC15] focus:outline-hidden"
-                />
-                <span className="text-[9px] text-gray-500 mt-1 block">
-                  A separate member pass & barcode will be registered for the partner
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Section 2: Membership Package */}
-          <div className="space-y-4 pt-4 border-t border-white/5">
-            <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
-              <CreditCard className="w-3.5 h-3.5" />
-              2. Membership Package & Admission Fee
-            </h4>
+            )}
 
             {/* Package Selector Cards */}
             <div>
               <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-2">
-                Select Package ({memberType === 'couple' ? 'Couple Rates' : 'Standard Rates'}) *
+                Select Package ({memberType === 'couple' ? 'Couple Rates' : 'Individual Rates'}) *
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {[
-                  { id: 'monthly', label: 'Monthly', desc: '1 Month' },
-                  { id: '3_months', label: '3 Months', desc: '3 Months' },
-                  { id: '6_months', label: '6 Months', desc: '6 Months' },
-                  { id: 'annual', label: 'Annual', desc: '12 Months' },
+                  { id: 'monthly', label: memberType === 'couple' ? 'Couple (1M)' : '1 Month', desc: '1 Month' },
+                  { id: '3_months', label: memberType === 'couple' ? 'Couple (3M)' : '3 Months', desc: '3 Months' },
+                  { id: '6_months', label: memberType === 'couple' ? 'Couple (6M)' : '6 Months', desc: '6 Months' },
+                  { id: 'annual', label: memberType === 'couple' ? 'Couple (12M)' : 'Annual', desc: '12 Months' },
                 ].map((pkg) => {
                   const isSelected = membershipPackage === pkg.id;
                   const price = (memberType === 'couple' ? couplePrices : individualPrices)[pkg.id as 'monthly' | '3_months' | '6_months' | 'annual'];
@@ -383,9 +414,9 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
                       key={pkg.id}
                       type="button"
                       onClick={() => setMembershipPackage(pkg.id as any)}
-                      className={`p-3.5 rounded-2xl border text-left transition-all ${
+                      className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
                         isSelected
-                          ? 'bg-[#FACC15]/10 border-[#FACC15] text-white shadow-xs'
+                          ? 'bg-[#FACC15]/15 border-[#FACC15] text-white shadow-md shadow-[#FACC15]/10'
                           : 'bg-black/40 border-white/10 text-gray-400 hover:border-white/20'
                       }`}
                     >
@@ -396,7 +427,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
                         {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-[#FACC15]" />}
                       </div>
                       <p className="text-[9px] text-gray-500 uppercase">{pkg.desc}</p>
-                      <p className="text-xs font-black text-white mt-1">
+                      <p className="text-xs font-black text-white mt-1 font-mono">
                         {currency} {price.toLocaleString()}
                       </p>
                     </button>
@@ -405,12 +436,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               </div>
             </div>
 
-            {/* ================================================================= */}
-            {/* REQUIRED FEATURE: OPTIONAL ADMISSION FEE CHECKBOX / TOGGLE         */}
-            {/* The admission fee must NEVER be automatically added.              */}
-            {/* Default state: UNCHECKED (Rs. 0)                                  */}
-            {/* When checked: Loads tenant admission fee from Gym Settings        */}
-            {/* ================================================================= */}
+            {/* Optional Admission Fee Checkbox */}
             <div className="p-4 rounded-2xl bg-black/60 border border-white/10 space-y-3">
               <div className="flex items-center justify-between">
                 <label
@@ -433,12 +459,12 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
                         </span>
                       ) : (
                         <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-white/5 text-gray-400 border border-white/10">
-                          Rs. 0 (Not Added)
+                          {currency} 0 (Unchecked)
                         </span>
                       )}
                     </span>
                     <p className="text-[10px] text-gray-400 mt-0.5">
-                      Optional one-time registration fee loaded from authenticated tenant gym settings.
+                      Optional one-time registration fee from tenant Gym Settings. Default is unchecked.
                     </p>
                   </div>
                 </label>
@@ -463,7 +489,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               </div>
             </div>
 
-            {/* Dates & Payment Details */}
+            {/* Dates & Payment Method */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
@@ -490,7 +516,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               </div>
             </div>
 
-            {/* Payment Method */}
+            {/* Payment Method Selector */}
             <div>
               <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
                 Payment Method *
@@ -505,7 +531,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
                     key={pm.id}
                     type="button"
                     onClick={() => setPaymentMethod(pm.id as any)}
-                    className={`flex-1 py-2.5 px-3 rounded-2xl border text-xs font-black uppercase tracking-wider transition-all ${
+                    className={`flex-1 py-2.5 px-3 rounded-2xl border text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                       paymentMethod === pm.id
                         ? 'bg-[#FACC15] text-black border-[#FACC15]'
                         : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
@@ -524,7 +550,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               </label>
               <input
                 type="text"
-                placeholder="e.g. Morning gym slot, special couple promo"
+                placeholder="e.g. Morning gym slot, special promo"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-2.5 text-white text-xs focus:border-[#FACC15] focus:outline-hidden"
@@ -532,7 +558,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             </div>
           </div>
 
-          {/* SMS Notification Notice */}
+          {/* SMS Notification Banner */}
           <div className="p-4 rounded-2xl bg-black/40 border border-white/5 flex items-center justify-between text-xs text-gray-400">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-400"></span>
@@ -545,7 +571,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider transition-colors"
+              className="px-5 py-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
             >
               Cancel
             </button>
@@ -553,7 +579,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               id="btn-submit-add-member"
               type="submit"
               disabled={loading}
-              className="px-6 py-3 rounded-full bg-[#FACC15] hover:bg-yellow-300 disabled:opacity-50 text-black text-xs font-black uppercase tracking-widest shadow-md shadow-[#FACC15]/20 transition-all active:scale-95"
+              className="px-6 py-3 rounded-full bg-[#FACC15] hover:bg-yellow-300 disabled:opacity-50 text-black text-xs font-black uppercase tracking-widest shadow-md shadow-[#FACC15]/20 transition-all active:scale-95 cursor-pointer"
             >
               {loading ? 'Registering...' : `Register & Pay ${currency} ${totalAmount.toLocaleString()}`}
             </button>
