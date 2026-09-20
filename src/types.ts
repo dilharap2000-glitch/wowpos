@@ -13,6 +13,11 @@ export interface Gym {
   threeMonthsPrice: number;
   sixMonthsPrice: number;
   annualPrice: number;
+  admissionFee?: number;
+  coupleMonthlyPrice?: number;
+  coupleThreeMonthsPrice?: number;
+  coupleSixMonthsPrice?: number;
+  coupleAnnualPrice?: number;
   smsUrl?: string | null;
   smsApiKey?: string | null;
   smsSenderId?: string | null;
@@ -38,6 +43,11 @@ export interface BusinessSettings {
   threeMonthsPrice?: number;
   sixMonthsPrice?: number;
   annualPrice?: number;
+  admissionFee?: number;
+  coupleMonthlyPrice?: number;
+  coupleThreeMonthsPrice?: number;
+  coupleSixMonthsPrice?: number;
+  coupleAnnualPrice?: number;
 }
 
 export interface UserAccount {
@@ -94,10 +104,15 @@ export interface Member {
   status: string;
   emergencyContact?: string | null;
   notes?: string | null;
+  memberType?: 'individual' | 'couple';
+  partnerName?: string | null;
+  partnerPhone?: string | null;
+  partnerMemberNumber?: string | null;
   archivedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
   latestMembership?: Membership | null;
+  latestPayment?: Payment | null;
   computedStatus: 'active' | 'expiring_soon' | 'due_today' | 'due_tomorrow' | 'expired' | 'inactive';
   daysRemaining: number;
   statusLabel: string;
@@ -124,6 +139,14 @@ export interface Membership {
   startDate: string;
   expiryDate: string;
   status: string;
+  membershipAmount?: number;
+  admissionFee?: number;
+  totalAmount?: number;
+  admissionFeeApplied?: boolean;
+  memberType?: 'individual' | 'couple';
+  partnerName?: string | null;
+  partnerPhone?: string | null;
+  partnerMemberNumber?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -134,6 +157,13 @@ export interface Payment {
   memberId: number;
   memberNumber: string;
   amount: number;
+  membershipAmount?: number;
+  admissionFee?: number;
+  totalAmount?: number;
+  admissionFeeApplied?: boolean;
+  memberType?: 'individual' | 'couple';
+  partnerName?: string | null;
+  partnerPhone?: string | null;
   paymentDate: string;
   package: string;
   paymentMethod: 'cash' | 'card' | 'bank_transfer';

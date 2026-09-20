@@ -203,6 +203,11 @@ export const MembersView: React.FC<MembersViewProps> = ({
                     <td className="py-3.5 px-3 font-bold text-white">
                       <div className="flex items-center gap-2">
                         <span>{m.fullName}</span>
+                        {m.memberType === 'couple' && (
+                          <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-[#FACC15]/20 text-[#FACC15] border border-[#FACC15]/30">
+                            Couple
+                          </span>
+                        )}
                         {m.notes && (
                           <span
                             title={m.notes}
@@ -210,6 +215,11 @@ export const MembersView: React.FC<MembersViewProps> = ({
                           />
                         )}
                       </div>
+                      {m.memberType === 'couple' && m.partnerName && (
+                        <div className="text-[10px] text-gray-400 font-normal mt-0.5">
+                          Partner: {m.partnerName}
+                        </div>
+                      )}
                     </td>
 
                     {/* Phone */}

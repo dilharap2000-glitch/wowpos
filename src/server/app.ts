@@ -348,12 +348,20 @@ app.post('/api/members', requireAuth, requireGymTenant, async (req: AuthRequest,
       membershipPackage,
       paymentDate,
       paymentAmount,
+      membershipAmount,
+      addAdmissionFee,
+      admissionFeeApplied,
+      memberType,
+      partnerName,
+      partnerPhone,
+      partnerMemberNumber,
+      registerPartnerMember,
       paymentMethod,
       emergencyContact,
       notes,
     } = req.body || {};
 
-    if (!memberNumber || !fullName || !phone || !membershipPackage || !paymentDate || paymentAmount === undefined) {
+    if (!memberNumber || !fullName || !phone || !membershipPackage || !paymentDate || (paymentAmount === undefined && membershipAmount === undefined)) {
       return res.status(400).json({ error: 'Missing required member fields (Member Number, Full Name, Phone, Package, Payment Date, Payment Amount).' });
     }
 
@@ -367,7 +375,15 @@ app.post('/api/members', requireAuth, requireGymTenant, async (req: AuthRequest,
       address,
       package: membershipPackage,
       startDate: paymentDate,
-      paymentAmount: Number(paymentAmount),
+      paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : undefined,
+      membershipAmount: membershipAmount !== undefined ? Number(membershipAmount) : undefined,
+      addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
+      admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
+      memberType: memberType === 'couple' ? 'couple' : 'individual',
+      partnerName,
+      partnerPhone,
+      partnerMemberNumber,
+      registerPartnerMember: Boolean(registerPartnerMember),
       paymentMethod: paymentMethod || 'cash',
       emergencyContact,
       notes,
@@ -463,9 +479,19 @@ app.post('/api/members/:id/renew', requireAuth, requireGymTenant, async (req: Au
     const businessId = req.businessId || resolveBusinessId(req.gymId);
     const gymId = req.gymId || resolveGymId(businessId);
     const id = Number(req.params.id);
-    const { package: pkg, startDate, paymentAmount, paymentMethod, notes } = req.body;
+    const {
+      package: pkg,
+      startDate,
+      paymentAmount,
+      membershipAmount,
+      addAdmissionFee,
+      admissionFeeApplied,
+      memberType,
+      paymentMethod,
+      notes,
+    } = req.body || {};
 
-    if (!pkg || !startDate || paymentAmount === undefined) {
+    if (!pkg || !startDate || (paymentAmount === undefined && membershipAmount === undefined)) {
       return res.status(400).json({ error: 'Package, start date, and payment amount are required.' });
     }
 
@@ -476,7 +502,11 @@ app.post('/api/members/:id/renew', requireAuth, requireGymTenant, async (req: Au
         businessId,
         package: pkg,
         startDate,
-        paymentAmount: Number(paymentAmount),
+        paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : undefined,
+        membershipAmount: membershipAmount !== undefined ? Number(membershipAmount) : undefined,
+        addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
+        admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
+        memberType,
         paymentMethod: paymentMethod || 'cash',
         notes,
         createdBy: req.user?.name || 'Admin',
@@ -794,6 +824,11 @@ app.get('/api/settings', requireAuth, requireGymTenant, async (req: AuthRequest,
       map['three_months_price'] = String(gymDetails.threeMonthsPrice || 12000);
       map['six_months_price'] = String(gymDetails.sixMonthsPrice || 22000);
       map['annual_price'] = String(gymDetails.annualPrice || 38000);
+      map['admission_fee'] = String(gymDetails.admissionFee !== undefined ? gymDetails.admissionFee : (businessId === 'biz_2' ? 1500 : businessId === 'biz_3' ? 25 : 1000));
+      map['couple_monthly_price'] = String(gymDetails.coupleMonthlyPrice || 8000);
+      map['couple_three_months_price'] = String(gymDetails.coupleThreeMonthsPrice || 20000);
+      map['couple_six_months_price'] = String(gymDetails.coupleSixMonthsPrice || 36000);
+      map['couple_annual_price'] = String(gymDetails.coupleAnnualPrice || 65000);
     }
 
     res.json(map);
@@ -821,10 +856,15 @@ app.put('/api/settings', requireAuth, requireGymTenant, requireRoles('SUPER_ADMI
       smsApiKey: updates['sms_api_key'],
       smsSenderId: updates['sms_sender_id'],
       smsEnabled: updates['sms_enabled'],
-      monthlyPrice: updates['monthly_price'] ? Number(updates['monthly_price']) : undefined,
-      threeMonthsPrice: updates['three_months_price'] ? Number(updates['three_months_price']) : undefined,
-      sixMonthsPrice: updates['six_months_price'] ? Number(updates['six_months_price']) : undefined,
-      annualPrice: updates['annual_price'] ? Number(updates['annual_price']) : undefined,
+      monthlyPrice: updates['monthly_price'] !== undefined ? Number(updates['monthly_price']) : undefined,
+      threeMonthsPrice: updates['three_months_price'] !== undefined ? Number(updates['three_months_price']) : undefined,
+      sixMonthsPrice: updates['six_months_price'] !== undefined ? Number(updates['six_months_price']) : undefined,
+      annualPrice: updates['annual_price'] !== undefined ? Number(updates['annual_price']) : undefined,
+      admissionFee: updates['admission_fee'] !== undefined ? Number(updates['admission_fee']) : undefined,
+      coupleMonthlyPrice: updates['couple_monthly_price'] !== undefined ? Number(updates['couple_monthly_price']) : undefined,
+      coupleThreeMonthsPrice: updates['couple_three_months_price'] !== undefined ? Number(updates['couple_three_months_price']) : undefined,
+      coupleSixMonthsPrice: updates['couple_six_months_price'] !== undefined ? Number(updates['couple_six_months_price']) : undefined,
+      coupleAnnualPrice: updates['couple_annual_price'] !== undefined ? Number(updates['couple_annual_price']) : undefined,
     });
 
     res.json({ success: true, message: 'Settings saved successfully', gym: updatedGym });

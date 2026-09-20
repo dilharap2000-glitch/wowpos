@@ -60,6 +60,11 @@ export const SettingsView: React.FC = () => {
   const [threeMonthsPrice, setThreeMonthsPrice] = useState(12000);
   const [sixMonthsPrice, setSixMonthsPrice] = useState(22000);
   const [annualPrice, setAnnualPrice] = useState(38000);
+  const [admissionFee, setAdmissionFee] = useState(1000);
+  const [coupleMonthlyPrice, setCoupleMonthlyPrice] = useState(8000);
+  const [coupleThreeMonthsPrice, setCoupleThreeMonthsPrice] = useState(20000);
+  const [coupleSixMonthsPrice, setCoupleSixMonthsPrice] = useState(36000);
+  const [coupleAnnualPrice, setCoupleAnnualPrice] = useState(65000);
 
   // Admin User Profile Fields (Strictly separate from Business in MongoDB Atlas)
   const [adminName, setAdminName] = useState('Titan');
@@ -106,8 +111,17 @@ export const SettingsView: React.FC = () => {
       setAddress(business.address || '');
       setCurrency(business.currency || 'Rs.');
       setDescription(business.description || '');
+      if (business.monthlyPrice !== undefined) setMonthlyPrice(business.monthlyPrice);
+      if (business.threeMonthsPrice !== undefined) setThreeMonthsPrice(business.threeMonthsPrice);
+      if (business.sixMonthsPrice !== undefined) setSixMonthsPrice(business.sixMonthsPrice);
+      if (business.annualPrice !== undefined) setAnnualPrice(business.annualPrice);
+      if (business.admissionFee !== undefined) setAdmissionFee(business.admissionFee);
+      if (business.coupleMonthlyPrice !== undefined) setCoupleMonthlyPrice(business.coupleMonthlyPrice);
+      if (business.coupleThreeMonthsPrice !== undefined) setCoupleThreeMonthsPrice(business.coupleThreeMonthsPrice);
+      if (business.coupleSixMonthsPrice !== undefined) setCoupleSixMonthsPrice(business.coupleSixMonthsPrice);
+      if (business.coupleAnnualPrice !== undefined) setCoupleAnnualPrice(business.coupleAnnualPrice);
     }
-  }, [business.gymName, business.logo, business.phone, business.email, business.address, business.currency, business.description]);
+  }, [business]);
 
   useEffect(() => {
     loadSettings();
@@ -162,6 +176,11 @@ export const SettingsView: React.FC = () => {
       if (res.three_months_price) setThreeMonthsPrice(Number(res.three_months_price));
       if (res.six_months_price) setSixMonthsPrice(Number(res.six_months_price));
       if (res.annual_price) setAnnualPrice(Number(res.annual_price));
+      if (res.admission_fee !== undefined) setAdmissionFee(Number(res.admission_fee));
+      if (res.couple_monthly_price !== undefined) setCoupleMonthlyPrice(Number(res.couple_monthly_price));
+      if (res.couple_three_months_price !== undefined) setCoupleThreeMonthsPrice(Number(res.couple_three_months_price));
+      if (res.couple_six_months_price !== undefined) setCoupleSixMonthsPrice(Number(res.couple_six_months_price));
+      if (res.couple_annual_price !== undefined) setCoupleAnnualPrice(Number(res.couple_annual_price));
     } catch (err) {
       console.error('Failed to load settings:', err);
     } finally {
@@ -319,9 +338,32 @@ export const SettingsView: React.FC = () => {
         three_months_price: String(threeMonthsPrice),
         six_months_price: String(sixMonthsPrice),
         annual_price: String(annualPrice),
+        admission_fee: String(admissionFee),
+        couple_monthly_price: String(coupleMonthlyPrice),
+        couple_three_months_price: String(coupleThreeMonthsPrice),
+        couple_six_months_price: String(coupleSixMonthsPrice),
+        couple_annual_price: String(coupleAnnualPrice),
       };
 
       await api.updateSettings(payload);
+      await updateBusiness({
+        gymName: gymName.trim(),
+        logo: logo.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        address: address.trim(),
+        currency: currency.trim(),
+        description: description.trim(),
+        monthlyPrice,
+        threeMonthsPrice,
+        sixMonthsPrice,
+        annualPrice,
+        admissionFee,
+        coupleMonthlyPrice,
+        coupleThreeMonthsPrice,
+        coupleSixMonthsPrice,
+        coupleAnnualPrice,
+      });
       setSettingsMap(payload);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4500);
@@ -790,6 +832,114 @@ export const SettingsView: React.FC = () => {
                         className="w-full bg-transparent font-black text-white text-base focus:outline-none"
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Couple Membership Package Pricing */}
+              <div className="pt-6 border-t border-white/10">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-black text-[#FACC15] uppercase tracking-wider">
+                    Couple Membership Package Rates ({currency})
+                  </h3>
+                  <span className="text-[10px] text-gray-500 font-mono">
+                    Covers both primary member & registered partner
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="p-3 bg-black/40 border border-white/5 rounded-xl">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">
+                      Couple (1 Month)
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-bold text-gray-500">{currency}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={coupleMonthlyPrice}
+                        onChange={(e) => setCoupleMonthlyPrice(Number(e.target.value))}
+                        className="w-full bg-transparent font-black text-white text-base focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-black/40 border border-white/5 rounded-xl">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">
+                      Couple (3 Months)
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-bold text-gray-500">{currency}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={coupleThreeMonthsPrice}
+                        onChange={(e) => setCoupleThreeMonthsPrice(Number(e.target.value))}
+                        className="w-full bg-transparent font-black text-white text-base focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-black/40 border border-white/5 rounded-xl">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">
+                      Couple (6 Months)
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-bold text-gray-500">{currency}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={coupleSixMonthsPrice}
+                        onChange={(e) => setCoupleSixMonthsPrice(Number(e.target.value))}
+                        className="w-full bg-transparent font-black text-white text-base focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-black/40 border border-white/5 rounded-xl">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">
+                      Couple (Annual)
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-bold text-gray-500">{currency}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={coupleAnnualPrice}
+                        onChange={(e) => setCoupleAnnualPrice(Number(e.target.value))}
+                        className="w-full bg-transparent font-black text-white text-base focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Admission / Registration Fee Configuration */}
+              <div className="pt-6 border-t border-white/10">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-xs font-black text-[#FACC15] uppercase tracking-wider">
+                      One-Time Admission Fee ({currency})
+                    </h3>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      Optional one-time onboarding fee. In registration and renewal forms, staff can check/uncheck <strong>&quot;ADD ADMISSION FEE&quot;</strong> (default is unchecked: {currency} 0).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="max-w-xs p-3.5 bg-black/40 border border-[#FACC15]/30 rounded-xl">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-[#FACC15] block mb-1">
+                    Default Admission Fee Amount
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-400">{currency}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={admissionFee}
+                      onChange={(e) => setAdmissionFee(Number(e.target.value))}
+                      className="w-full bg-transparent font-black text-white text-lg focus:outline-none"
+                    />
                   </div>
                 </div>
               </div>

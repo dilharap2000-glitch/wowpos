@@ -23,6 +23,11 @@ const defaultBusiness: BusinessSettings = {
   threeMonthsPrice: 12000,
   sixMonthsPrice: 22000,
   annualPrice: 38000,
+  admissionFee: 1000,
+  coupleMonthlyPrice: 8000,
+  coupleThreeMonthsPrice: 20000,
+  coupleSixMonthsPrice: 36000,
+  coupleAnnualPrice: 65000,
 };
 
 const BusinessContext = createContext<BusinessContextType>({
@@ -56,10 +61,15 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         currency: (data as any).currency || prev.currency || 'Rs.',
         description: (data as any).description !== undefined ? (data as any).description : prev.description,
         receiptFooter: (data as any).receipt_footer || (data as any).receiptFooter || prev.receiptFooter,
-        monthlyPrice: (data as any).monthly_price ? Number((data as any).monthly_price) : prev.monthlyPrice,
-        threeMonthsPrice: (data as any).three_months_price ? Number((data as any).three_months_price) : prev.threeMonthsPrice,
-        sixMonthsPrice: (data as any).six_months_price ? Number((data as any).six_months_price) : prev.sixMonthsPrice,
-        annualPrice: (data as any).annual_price ? Number((data as any).annual_price) : prev.annualPrice,
+        monthlyPrice: (data as any).monthly_price ? Number((data as any).monthly_price) : (data as any).monthlyPrice !== undefined ? Number((data as any).monthlyPrice) : prev.monthlyPrice,
+        threeMonthsPrice: (data as any).three_months_price ? Number((data as any).three_months_price) : (data as any).threeMonthsPrice !== undefined ? Number((data as any).threeMonthsPrice) : prev.threeMonthsPrice,
+        sixMonthsPrice: (data as any).six_months_price ? Number((data as any).six_months_price) : (data as any).sixMonthsPrice !== undefined ? Number((data as any).sixMonthsPrice) : prev.sixMonthsPrice,
+        annualPrice: (data as any).annual_price ? Number((data as any).annual_price) : (data as any).annualPrice !== undefined ? Number((data as any).annualPrice) : prev.annualPrice,
+        admissionFee: (data as any).admission_fee !== undefined ? Number((data as any).admission_fee) : (data as any).admissionFee !== undefined ? Number((data as any).admissionFee) : (prev.admissionFee ?? 1000),
+        coupleMonthlyPrice: (data as any).couple_monthly_price !== undefined ? Number((data as any).couple_monthly_price) : (data as any).coupleMonthlyPrice !== undefined ? Number((data as any).coupleMonthlyPrice) : (prev.coupleMonthlyPrice ?? 8000),
+        coupleThreeMonthsPrice: (data as any).couple_three_months_price !== undefined ? Number((data as any).couple_three_months_price) : (data as any).coupleThreeMonthsPrice !== undefined ? Number((data as any).coupleThreeMonthsPrice) : (prev.coupleThreeMonthsPrice ?? 20000),
+        coupleSixMonthsPrice: (data as any).couple_six_months_price !== undefined ? Number((data as any).couple_six_months_price) : (data as any).coupleSixMonthsPrice !== undefined ? Number((data as any).coupleSixMonthsPrice) : (prev.coupleSixMonthsPrice ?? 36000),
+        coupleAnnualPrice: (data as any).couple_annual_price !== undefined ? Number((data as any).couple_annual_price) : (data as any).coupleAnnualPrice !== undefined ? Number((data as any).coupleAnnualPrice) : (prev.coupleAnnualPrice ?? 65000),
       };
 
       try {
@@ -127,6 +137,11 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
       if (updates.threeMonthsPrice !== undefined) payload['three_months_price'] = String(updates.threeMonthsPrice);
       if (updates.sixMonthsPrice !== undefined) payload['six_months_price'] = String(updates.sixMonthsPrice);
       if (updates.annualPrice !== undefined) payload['annual_price'] = String(updates.annualPrice);
+      if (updates.admissionFee !== undefined) payload['admission_fee'] = String(updates.admissionFee);
+      if (updates.coupleMonthlyPrice !== undefined) payload['couple_monthly_price'] = String(updates.coupleMonthlyPrice);
+      if (updates.coupleThreeMonthsPrice !== undefined) payload['couple_three_months_price'] = String(updates.coupleThreeMonthsPrice);
+      if (updates.coupleSixMonthsPrice !== undefined) payload['couple_six_months_price'] = String(updates.coupleSixMonthsPrice);
+      if (updates.coupleAnnualPrice !== undefined) payload['couple_annual_price'] = String(updates.coupleAnnualPrice);
 
       await api.updateSettings(payload);
       applyBusinessData(updates);
