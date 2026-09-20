@@ -45,7 +45,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   // 1. Membership Type State: Default is 'individual'
   const [memberType, setMemberType] = useState<'individual' | 'couple'>('individual');
 
-  // Primary Member Identity Fields
+  // Primary Member (Member #1) Identity Fields - ALWAYS PRESERVED
   const [memberNumber, setMemberNumber] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
@@ -53,7 +53,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   const [address, setAddress] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
 
-  // Partner Fields (ONLY for Couple Membership)
+  // Partner (Member #2) Fields (ONLY for Couple Membership)
   const [partnerName, setPartnerName] = useState('');
   const [partnerPhone, setPartnerPhone] = useState('');
   const [partnerMemberNumber, setPartnerMemberNumber] = useState('');
@@ -92,6 +92,12 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
       setMemberType('individual');
       setMembershipPackage('monthly');
       setAddAdmissionFee(false);
+      setMemberNumber('');
+      setFullName('');
+      setPhone('');
+      setEmail('');
+      setAddress('');
+      setEmergencyContact('');
       setPartnerName('');
       setPartnerPhone('');
       setPartnerMemberNumber('');
@@ -100,7 +106,8 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
     }
   }, [isOpen, refreshBusiness]);
 
-  // Seamless switching between INDIVIDUAL and COUPLE with complete state cleanup
+  // Seamless switching between INDIVIDUAL and COUPLE
+  // Main member info (memberNumber, fullName, phone, emergencyContact) is STRICTLY PRESERVED
   const handleSelectMemberType = (newType: 'individual' | 'couple') => {
     if (newType === memberType) return;
     setMemberType(newType);
@@ -108,7 +115,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
     setMembershipPackage('monthly');
     // Reset admission fee to unchecked
     setAddAdmissionFee(false);
-    // Strictly clear couple partner data when switching
+    // Clear partner data when switching so stale couple data is never submitted
     setPartnerName('');
     setPartnerPhone('');
     setPartnerMemberNumber('');
@@ -212,12 +219,68 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             </div>
           )}
 
-          {/* Section 1: Member Identity */}
-          <div className="space-y-4">
-            <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
-              <User className="w-3.5 h-3.5" />
-              1. Member Information
-            </h4>
+          {/* ============================================================= */}
+          {/* MEMBERSHIP TYPE SELECTOR (AT TOP OF FORM)                     */}
+          {/* Always visible, always clickable, seamless free switching.     */}
+          {/* Default: INDIVIDUAL. Highlighted with WOW POS yellow/gold.    */}
+          {/* ============================================================= */}
+          <div className="space-y-2 p-4 rounded-2xl bg-black/50 border border-white/10">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-black uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
+                MEMBERSHIP TYPE *
+              </label>
+              <span className="text-[10px] text-gray-400 font-mono">
+                Currently Selected: <strong className="text-[#FACC15] uppercase">{memberType}</strong>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 p-1.5 bg-black/70 border border-white/10 rounded-2xl">
+              <button
+                type="button"
+                id="btn-membership-type-individual"
+                onClick={() => handleSelectMemberType('individual')}
+                className={`py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer select-none active:scale-95 ${
+                  memberType === 'individual'
+                    ? 'bg-[#FACC15] text-black shadow-lg shadow-[#FACC15]/25 border-2 border-[#FACC15]'
+                    : 'bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border-2 border-transparent'
+                }`}
+              >
+                <User className="w-4 h-4" />
+                <span>INDIVIDUAL</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-membership-type-couple"
+                onClick={() => handleSelectMemberType('couple')}
+                className={`py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer select-none active:scale-95 ${
+                  memberType === 'couple'
+                    ? 'bg-[#FACC15] text-black shadow-lg shadow-[#FACC15]/25 border-2 border-[#FACC15]'
+                    : 'bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border-2 border-transparent'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>COUPLE</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ============================================================= */}
+          {/* SECTION 1: MEMBER INFORMATION (MEMBER #1)                      */}
+          {/* MUST REMAIN VISIBLE FOR BOTH INDIVIDUAL AND COUPLE TYPES       */}
+          {/* ============================================================= */}
+          <div className="space-y-4 pt-1">
+            <div className="flex items-center justify-between">
+              <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
+                <User className="w-3.5 h-3.5" />
+                1. Member Information {memberType === 'couple' ? '(Member #1 - Main Member)' : ''}
+              </h4>
+              {memberType === 'couple' && (
+                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider bg-white/5 px-2.5 py-1 rounded-full border border-white/5">
+                  Primary Account Holder
+                </span>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -282,72 +345,23 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             </div>
           </div>
 
-          {/* Section 2: Membership Package & Type */}
-          <div className="space-y-5 pt-4 border-t border-white/5">
-            <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
-              <CreditCard className="w-3.5 h-3.5" />
-              2. Membership Type & Package
-            </h4>
-
-            {/* ============================================================= */}
-            {/* REQUIRED FEATURE: CLEAR MEMBERSHIP TYPE SELECTOR              */}
-            {/* Always visible, always clickable, seamless free switching.     */}
-            {/* Default: INDIVIDUAL. Highlighted with WOW POS yellow/gold.    */}
-            {/* ============================================================= */}
-            <div className="space-y-2">
+          {/* ============================================================= */}
+          {/* SECTION 2: COUPLE PARTNER INFORMATION (MEMBER #2)             */}
+          {/* ONLY DISPLAYED WHEN COUPLE IS SELECTED                         */}
+          {/* ============================================================= */}
+          {memberType === 'couple' && (
+            <div className="space-y-4 pt-4 border-t border-white/5">
               <div className="flex items-center justify-between">
-                <label className="text-[10px] font-black uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
-                  MEMBERSHIP TYPE *
-                </label>
-                <span className="text-[10px] text-gray-400 font-mono">
-                  Currently Selected: <strong className="text-[#FACC15] uppercase">{memberType}</strong>
+                <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
+                  <Users className="w-3.5 h-3.5" />
+                  2. Couple Partner Information (Member #2)
+                </h4>
+                <span className="text-[9px] font-bold text-[#FACC15] uppercase font-mono tracking-wider bg-[#FACC15]/10 px-2.5 py-1 rounded-full border border-[#FACC15]/20">
+                  Included in Couple Package
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 p-1.5 bg-black/60 border border-white/10 rounded-2xl">
-                <button
-                  type="button"
-                  id="btn-membership-type-individual"
-                  onClick={() => handleSelectMemberType('individual')}
-                  className={`py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer select-none active:scale-95 ${
-                    memberType === 'individual'
-                      ? 'bg-[#FACC15] text-black shadow-lg shadow-[#FACC15]/25 border-2 border-[#FACC15]'
-                      : 'bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border-2 border-transparent'
-                  }`}
-                >
-                  <User className="w-4 h-4" />
-                  <span>INDIVIDUAL</span>
-                </button>
-
-                <button
-                  type="button"
-                  id="btn-membership-type-couple"
-                  onClick={() => handleSelectMemberType('couple')}
-                  className={`py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer select-none active:scale-95 ${
-                    memberType === 'couple'
-                      ? 'bg-[#FACC15] text-black shadow-lg shadow-[#FACC15]/25 border-2 border-[#FACC15]'
-                      : 'bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border-2 border-transparent'
-                  }`}
-                >
-                  <Users className="w-4 h-4" />
-                  <span>COUPLE</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Couple-Specific Partner Fields (Only visible when COUPLE is selected) */}
-            {memberType === 'couple' && (
               <div className="space-y-4 p-4 bg-[#FACC15]/5 border border-[#FACC15]/20 rounded-2xl">
-                <div className="flex items-center justify-between">
-                  <h5 className="text-[11px] font-black text-[#FACC15] uppercase tracking-wider flex items-center gap-2">
-                    <Users className="w-3.5 h-3.5" />
-                    Couple Partner Information
-                  </h5>
-                  <span className="text-[9px] text-gray-400 uppercase font-mono">
-                    Included in Couple Package
-                  </span>
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1">
@@ -393,7 +407,18 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
                   </span>
                 </div>
               </div>
-            )}
+            </div>
+          )}
+
+          {/* ============================================================= */}
+          {/* SECTION 3: MEMBERSHIP PACKAGE                                 */}
+          {/* Dynamically displays Individual or Couple Packages and Rates   */}
+          {/* ============================================================= */}
+          <div className="space-y-4 pt-4 border-t border-white/5">
+            <h4 className="text-[11px] font-black text-[#FACC15] uppercase tracking-widest flex items-center gap-2">
+              <CreditCard className="w-3.5 h-3.5" />
+              {memberType === 'couple' ? '3. Couple Membership Package' : '2. Membership Package'}
+            </h4>
 
             {/* Package Selector Cards */}
             <div>
@@ -473,7 +498,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               {/* Real-Time Pricing Summary Breakdown */}
               <div className="pt-3 border-t border-white/5 space-y-1.5 text-xs font-mono">
                 <div className="flex justify-between text-gray-400">
-                  <span>Membership ({memberType === 'couple' ? 'Couple' : 'Individual'} - {membershipPackage.replace('_', ' ')}):</span>
+                  <span>Membership Fee ({memberType === 'couple' ? 'Couple' : 'Individual'} - {membershipPackage.replace('_', ' ')}):</span>
                   <span className="text-white font-bold">{currency} {activePackagePrice.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-gray-400">
