@@ -29,6 +29,8 @@ export interface Gym {
   updatedAt?: string;
 }
 
+export type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'mintpay' | 'payzy' | 'koko';
+
 export interface BusinessSettings {
   id?: number;
   gymName: string;
@@ -48,6 +50,15 @@ export interface BusinessSettings {
   coupleThreeMonthsPrice?: number;
   coupleSixMonthsPrice?: number;
   coupleAnnualPrice?: number;
+  paymentFeeMintpay?: number;
+  paymentFeePayzy?: number;
+  paymentFeeKoko?: number;
+  paymentFeeCash?: number;
+  paymentFeeCard?: number;
+  paymentFeeBankTransfer?: number;
+  paymentFeeEnabledMintpay?: boolean;
+  paymentFeeEnabledPayzy?: boolean;
+  paymentFeeEnabledKoko?: boolean;
 }
 
 export interface UserAccount {
@@ -157,6 +168,9 @@ export interface Payment {
   memberId: number;
   memberNumber: string;
   amount: number;
+  baseAmount?: number;
+  paymentFee?: number;
+  paymentFeeRate?: number;
   membershipAmount?: number;
   admissionFee?: number;
   totalAmount?: number;
@@ -166,7 +180,7 @@ export interface Payment {
   partnerPhone?: string | null;
   paymentDate: string;
   package: string;
-  paymentMethod: 'cash' | 'card' | 'bank_transfer';
+  paymentMethod: PaymentMethod;
   previousExpiryDate?: string | null;
   newExpiryDate: string;
   createdBy?: string;
@@ -241,9 +255,12 @@ export interface Sale {
   customerPhone?: string | null;
   subtotal: number;
   discount: number;
+  baseAmount?: number;
+  paymentFee?: number;
+  paymentFeeRate?: number;
   finalAmount: number;
   totalAmount?: number;
-  paymentMethod: 'cash' | 'card' | 'bank_transfer';
+  paymentMethod: PaymentMethod;
   status: 'completed' | 'refunded' | 'cancelled';
   paymentStatus?: string;
   refundReason?: string | null;

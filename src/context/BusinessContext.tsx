@@ -28,6 +28,15 @@ const defaultBusiness: BusinessSettings = {
   coupleThreeMonthsPrice: 20000,
   coupleSixMonthsPrice: 36000,
   coupleAnnualPrice: 65000,
+  paymentFeeMintpay: 12,
+  paymentFeePayzy: 12,
+  paymentFeeKoko: 12,
+  paymentFeeCash: 0,
+  paymentFeeCard: 0,
+  paymentFeeBankTransfer: 0,
+  paymentFeeEnabledMintpay: true,
+  paymentFeeEnabledPayzy: true,
+  paymentFeeEnabledKoko: true,
 };
 
 const BusinessContext = createContext<BusinessContextType>({
@@ -70,6 +79,15 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         coupleThreeMonthsPrice: (data as any).couple_three_months_price !== undefined ? Number((data as any).couple_three_months_price) : (data as any).coupleThreeMonthsPrice !== undefined ? Number((data as any).coupleThreeMonthsPrice) : (prev.coupleThreeMonthsPrice ?? 20000),
         coupleSixMonthsPrice: (data as any).couple_six_months_price !== undefined ? Number((data as any).couple_six_months_price) : (data as any).coupleSixMonthsPrice !== undefined ? Number((data as any).coupleSixMonthsPrice) : (prev.coupleSixMonthsPrice ?? 36000),
         coupleAnnualPrice: (data as any).couple_annual_price !== undefined ? Number((data as any).couple_annual_price) : (data as any).coupleAnnualPrice !== undefined ? Number((data as any).coupleAnnualPrice) : (prev.coupleAnnualPrice ?? 65000),
+        paymentFeeMintpay: (data as any).payment_fee_mintpay !== undefined ? Number((data as any).payment_fee_mintpay) : (data as any).paymentFeeMintpay !== undefined ? Number((data as any).paymentFeeMintpay) : (prev.paymentFeeMintpay ?? 12),
+        paymentFeePayzy: (data as any).payment_fee_payzy !== undefined ? Number((data as any).payment_fee_payzy) : (data as any).paymentFeePayzy !== undefined ? Number((data as any).paymentFeePayzy) : (prev.paymentFeePayzy ?? 12),
+        paymentFeeKoko: (data as any).payment_fee_koko !== undefined ? Number((data as any).payment_fee_koko) : (data as any).paymentFeeKoko !== undefined ? Number((data as any).paymentFeeKoko) : (prev.paymentFeeKoko ?? 12),
+        paymentFeeCash: (data as any).payment_fee_cash !== undefined ? Number((data as any).payment_fee_cash) : (data as any).paymentFeeCash !== undefined ? Number((data as any).paymentFeeCash) : (prev.paymentFeeCash ?? 0),
+        paymentFeeCard: (data as any).payment_fee_card !== undefined ? Number((data as any).payment_fee_card) : (data as any).paymentFeeCard !== undefined ? Number((data as any).paymentFeeCard) : (prev.paymentFeeCard ?? 0),
+        paymentFeeBankTransfer: (data as any).payment_fee_bank_transfer !== undefined ? Number((data as any).payment_fee_bank_transfer) : (data as any).paymentFeeBankTransfer !== undefined ? Number((data as any).paymentFeeBankTransfer) : (prev.paymentFeeBankTransfer ?? 0),
+        paymentFeeEnabledMintpay: (data as any).payment_fee_enabled_mintpay !== undefined ? (data as any).payment_fee_enabled_mintpay === true || (data as any).payment_fee_enabled_mintpay === 'true' : (prev.paymentFeeEnabledMintpay ?? true),
+        paymentFeeEnabledPayzy: (data as any).payment_fee_enabled_payzy !== undefined ? (data as any).payment_fee_enabled_payzy === true || (data as any).payment_fee_enabled_payzy === 'true' : (prev.paymentFeeEnabledPayzy ?? true),
+        paymentFeeEnabledKoko: (data as any).payment_fee_enabled_koko !== undefined ? (data as any).payment_fee_enabled_koko === true || (data as any).payment_fee_enabled_koko === 'true' : (prev.paymentFeeEnabledKoko ?? true),
       };
 
       try {
