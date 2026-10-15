@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, RefreshCw, AlertCircle, ShieldCheck, CheckCircle2, Users, User, ShieldAlert } from 'lucide-react';
+import { X, RefreshCw, AlertCircle, ShieldCheck, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { getColomboToday, calculateExpiryDate, sanitizeDateString } from '../lib/date-utils.ts';
 import { api } from '../lib/api.ts';
-import { Member } from '../types.ts';
+import { Member, PaymentMethod } from '../types.ts';
 import { useBusiness } from '../context/BusinessContext.tsx';
+import { calculatePaymentFee, PAYMENT_METHODS } from '../lib/payment-fee.ts';
 
 interface RenewMemberModalProps {
   member: Member | null;
@@ -48,7 +49,7 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
   }, [business.admissionFee]);
 
   const [membershipPackage, setMembershipPackage] = useState<'monthly' | '3_months' | '6_months' | 'annual'>('monthly');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer' | 'card'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paymentDate, setPaymentDate] = useState(getColomboToday());
   const [notes, setNotes] = useState('');
 
@@ -62,8 +63,11 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       refreshBusiness();
+      setMembershipPackage('monthly');
+      setPaymentMethod('cash');
       setPaymentDate(getColomboToday());
       setAddAdmissionFee(false);
+      setNotes('');
       setError(null);
       setShowConfirm(false);
     }
@@ -82,7 +86,29 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
   // Active membership price based on member type and package
   const activePackagePrice = (isCouple ? couplePrices : individualPrices)[membershipPackage] || 0;
   const currentAdmissionFee = addAdmissionFee ? tenantAdmissionFee : 0;
-  const totalAmount = activePackagePrice + currentAdmissionFee;
+  const baseAmount = activePackagePrice + currentAdmissionFee;
+
+  const configuredFeeRate = useMemo(() => {
+    if (paymentMethod === 'mintpay') return business.paymentFeeMintpay ?? 12;
+    if (paymentMethod === 'payzy') return business.paymentFeePayzy ?? 12;
+    if (paymentMethod === 'koko') return business.paymentFeeKoko ?? 12;
+    if (paymentMethod === 'card') return business.paymentFeeCard ?? 0;
+    if (paymentMethod === 'bank_transfer') return business.paymentFeeBankTransfer ?? 0;
+    return business.paymentFeeCash ?? 0;
+  }, [business, paymentMethod]);
+
+  const feeEnabled = useMemo(() => {
+    if (paymentMethod === 'mintpay') return business.paymentFeeEnabledMintpay !== false;
+    if (paymentMethod === 'payzy') return business.paymentFeeEnabledPayzy !== false;
+    if (paymentMethod === 'koko') return business.paymentFeeEnabledKoko !== false;
+    return true;
+  }, [business, paymentMethod]);
+
+  const feeCalc = useMemo(() => {
+    return calculatePaymentFee(baseAmount, paymentMethod, configuredFeeRate, feeEnabled);
+  }, [baseAmount, paymentMethod, configuredFeeRate, feeEnabled]);
+
+  const totalAmount = feeCalc.totalAmount;
 
   const handlePackageChange = (pkg: 'monthly' | '3_months' | '6_months' | 'annual') => {
     setMembershipPackage(pkg);
@@ -110,7 +136,11 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
         addAdmissionFee,
         admissionFeeApplied: addAdmissionFee,
         membershipAmount: activePackagePrice,
+        baseAmount,
+        paymentFee: feeCalc.paymentFee,
+        paymentFeeRate: feeCalc.paymentFeeRate,
         paymentAmount: totalAmount,
+        totalAmount,
         paymentMethod,
         memberType: member.memberType || 'individual',
         notes: notes.trim() || undefined,
@@ -128,19 +158,23 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+    <div
+      className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 md:p-6 bg-black/85 backdrop-blur-md overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+    >
       <div
         id="renew-member-modal"
-        className="bg-[#121212] border border-white/10 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl my-8"
+        className="bg-[#121212] border border-white/10 rounded-2xl sm:rounded-3xl w-full max-w-xl shadow-2xl flex flex-col my-auto max-h-[96vh] sm:max-h-[92vh] overflow-hidden"
       >
-        {/* Header */}
-        <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#FACC15] flex items-center justify-center text-black shadow-md shadow-[#FACC15]/20">
+        {/* Sticky Header */}
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-white/10 flex items-center justify-between bg-[#121212] shrink-0 z-20">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-[#FACC15] flex items-center justify-center text-black shadow-md shadow-[#FACC15]/20 shrink-0">
               <RefreshCw className="w-5 h-5 stroke-[2.5]" />
             </div>
-            <div>
-              <h3 className="text-base font-black italic text-white uppercase tracking-wider flex items-center gap-2">
+            <div className="min-w-0">
+              <h3 className="text-sm sm:text-base font-black italic text-white uppercase tracking-wider flex items-center gap-2 truncate">
                 <span>Renew Membership</span>
                 {isCouple ? (
                   <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#FACC15]/20 text-[#FACC15] border border-[#FACC15]/30">
@@ -152,38 +186,38 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
                   </span>
                 )}
               </h3>
-              <p className="text-xs text-gray-400">
+              <p className="text-[11px] sm:text-xs text-gray-400 truncate">
                 {member.fullName} ({member.memberNumber})
                 {isCouple && member.partnerName && ` & ${member.partnerName}`}
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-2.5 rounded-2xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+            aria-label="Close modal"
+            className="p-2 sm:p-2.5 rounded-2xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer shrink-0 ml-2"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Confirmation Step Dialog */}
+        {/* Modal Body */}
         {showConfirm ? (
-          <div className="p-6 sm:p-8 space-y-6">
-            <div className="p-5 rounded-3xl bg-[#FACC15]/10 border border-[#FACC15]/20 text-gray-200">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-5 overscroll-contain">
+            <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl bg-[#FACC15]/10 border border-[#FACC15]/20 text-gray-200">
               <h4 className="text-xs font-black text-[#FACC15] uppercase tracking-wider mb-2 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4" />
+                <ShieldCheck className="w-4 h-4 shrink-0" />
                 Confirm Renewal & Payment
               </h4>
               <p className="text-xs leading-relaxed text-gray-300">
                 Please verify the renewal terms for <strong className="text-white">{member.fullName}</strong>:
               </p>
 
-              <div className="mt-4 space-y-2 text-xs bg-black/40 p-4 rounded-2xl border border-white/5 font-mono">
+              <div className="mt-4 space-y-2 border-t border-white/10 pt-3 text-xs font-mono">
                 <div className="flex justify-between">
                   <span className="text-gray-400">Package:</span>
-                  <span className="text-white font-bold capitalize">
-                    {isCouple ? 'Couple ' : ''}{membershipPackage.replace('_', ' ')}
-                  </span>
+                  <span className="text-white font-bold uppercase">{membershipPackage.replace('_', ' ')}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Membership Fee:</span>
@@ -191,12 +225,18 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Admission Fee:</span>
-                  <span className={addAdmissionFee ? 'text-[#FACC15] font-bold' : 'text-gray-500 font-bold'}>
-                    {addAdmissionFee ? `+ ${currency} ${tenantAdmissionFee.toLocaleString()}` : `${currency} 0 (Not Added)`}
+                  <span className={addAdmissionFee ? 'text-[#FACC15] font-bold' : 'text-gray-500'}>
+                    {addAdmissionFee ? `+ ${currency} ${tenantAdmissionFee.toLocaleString()}` : `${currency} 0 (Unchecked)`}
                   </span>
                 </div>
-                <div className="flex justify-between border-t border-white/10 pt-2 font-bold">
-                  <span className="text-white">Total Payment:</span>
+                {feeCalc.paymentFee > 0 && (
+                  <div className="flex justify-between text-cyan-400">
+                    <span>Payment Fee ({feeCalc.paymentFeeRate}%):</span>
+                    <span className="font-bold">+ {currency} {feeCalc.paymentFee.toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-2 border-t border-white/10">
+                  <span className="text-gray-400 font-sans font-bold">Total Payable:</span>
                   <span className="text-[#FACC15] text-sm font-black">{currency} {totalAmount.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
@@ -218,11 +258,11 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
               * Payment receipt and updated membership confirmation SMS will be dispatched immediately via SMSLEN.
             </p>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3 pt-2">
               <button
                 type="button"
                 onClick={() => setShowConfirm(false)}
-                className="px-5 py-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider transition-colors"
+                className="min-h-[44px] px-5 py-2.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs sm:text-sm font-black uppercase tracking-wider transition-colors cursor-pointer text-center"
               >
                 Back & Edit
               </button>
@@ -231,7 +271,7 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
                 type="button"
                 disabled={loading}
                 onClick={handleExecuteRenewal}
-                className="px-6 py-3 rounded-full bg-[#FACC15] hover:bg-yellow-300 disabled:opacity-50 text-black text-xs font-black uppercase tracking-widest shadow-md shadow-[#FACC15]/20 transition-all active:scale-95"
+                className="min-h-[44px] px-6 py-2.5 rounded-full bg-[#FACC15] hover:bg-yellow-300 disabled:opacity-50 text-black text-xs sm:text-sm font-black uppercase tracking-widest shadow-md shadow-[#FACC15]/20 transition-all active:scale-[0.98] cursor-pointer text-center"
               >
                 {loading ? 'Processing...' : `Confirm & Pay ${currency} ${totalAmount.toLocaleString()}`}
               </button>
@@ -239,7 +279,7 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
           </div>
         ) : (
           /* Main Renewal Input Form */
-          <form onSubmit={handleInitialSubmit} className="p-6 sm:p-8 space-y-6">
+          <form onSubmit={handleInitialSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-5 sm:space-y-6 overscroll-contain">
             {error && (
               <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 shrink-0" />
@@ -248,25 +288,25 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
             )}
 
             {/* Current Expiry & Remaining Days Logic Banner */}
-            <div className="p-4 rounded-3xl bg-black/40 border border-white/5">
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-black/40 border border-white/5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-400 font-medium">Current Expiry Date:</span>
                 <span className="font-mono font-bold text-white">{currentExpiry || 'No active membership'}</span>
               </div>
 
               {isCurrentlyActive ? (
-                <div className="mt-3 text-xs text-green-400 bg-green-500/10 border border-green-500/20 p-3 rounded-2xl flex items-center gap-2">
+                <div className="mt-3 text-xs text-green-400 bg-green-500/10 border border-green-500/20 p-3 rounded-xl flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>
                     <strong>Member is active:</strong> Renewal automatically extends from existing expiry (
-                    <span className="font-mono font-bold">{currentExpiry}</span>). Remaining days are fully preserved!
+                    <span className="font-mono font-bold">{currentExpiry}</span>).
                   </span>
                 </div>
               ) : (
-                <div className="mt-3 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 p-3 rounded-2xl flex items-center gap-2">
+                <div className="mt-3 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>
-                    <strong>Membership is expired:</strong> Renewal starts fresh from today&apos;s payment date.
+                    <strong>Membership is expired:</strong> Renewal starts fresh from payment date.
                   </span>
                 </div>
               )}
@@ -277,12 +317,12 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
               <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-2">
                 Select Renewal Package ({isCouple ? 'Couple Rates' : 'Standard Rates'}) *
               </label>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
                 {[
-                  { id: 'monthly', label: 'Monthly', desc: '1 Month' },
-                  { id: '3_months', label: '3 Months', desc: '3 Months' },
-                  { id: '6_months', label: '6 Months', desc: '6 Months' },
-                  { id: 'annual', label: 'Annual', desc: '12 Months' },
+                  { id: 'monthly', label: isCouple ? 'Couple (1M)' : 'Monthly', desc: '1 Month' },
+                  { id: '3_months', label: isCouple ? 'Couple (3M)' : '3 Months', desc: '3 Months' },
+                  { id: '6_months', label: isCouple ? 'Couple (6M)' : '6 Months', desc: '6 Months' },
+                  { id: 'annual', label: isCouple ? 'Couple (12M)' : 'Annual', desc: '12 Months' },
                 ].map((pkg) => {
                   const isSelected = membershipPackage === pkg.id;
                   const price = (isCouple ? couplePrices : individualPrices)[pkg.id as 'monthly' | '3_months' | '6_months' | 'annual'];
@@ -291,20 +331,20 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
                       key={pkg.id}
                       type="button"
                       onClick={() => handlePackageChange(pkg.id as any)}
-                      className={`p-3.5 rounded-2xl border text-left transition-all ${
+                      className={`min-h-[68px] p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between select-none ${
                         isSelected
-                          ? 'bg-[#FACC15]/10 border-[#FACC15] text-white shadow-xs'
-                          : 'bg-black/40 border-white/10 text-gray-400 hover:border-white/20'
+                          ? 'bg-[#FACC15]/15 border-[#FACC15] text-white shadow-xs'
+                          : 'bg-black/40 border-white/10 text-gray-400 hover:border-white/20 hover:text-white'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className={`text-xs font-black uppercase ${isSelected ? 'text-[#FACC15]' : 'text-gray-200'}`}>
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className={`text-xs font-black uppercase truncate ${isSelected ? 'text-[#FACC15]' : 'text-gray-200'}`}>
                           {pkg.label}
                         </span>
-                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-[#FACC15]" />}
+                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-[#FACC15] shrink-0" />}
                       </div>
                       <p className="text-[9px] text-gray-500 uppercase">{pkg.desc}</p>
-                      <p className="text-xs font-black text-white mt-1">
+                      <p className="text-xs font-black text-white mt-1 font-mono">
                         {currency} {price.toLocaleString()}
                       </p>
                     </button>
@@ -313,25 +353,24 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
               </div>
             </div>
 
-            {/* ================================================================= */}
-            {/* OPTIONAL ADMISSION FEE CHECKBOX ON RENEWALS                       */}
-            {/* Default: UNCHECKED. Never automatically added to renewals.        */}
-            {/* ================================================================= */}
-            <div className="p-4 rounded-2xl bg-black/60 border border-white/10 space-y-3">
+            {/* Optional Admission Fee Checkbox */}
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-black/60 border border-white/10 space-y-3">
               <label
                 htmlFor="checkbox-renew-admission-fee"
-                className="flex items-center gap-3 cursor-pointer select-none"
+                className="flex items-start sm:items-center gap-3 cursor-pointer select-none"
               >
                 <input
                   type="checkbox"
                   id="checkbox-renew-admission-fee"
                   checked={addAdmissionFee}
                   onChange={(e) => setAddAdmissionFee(e.target.checked)}
-                  className="w-5 h-5 rounded-md border-white/20 bg-black/60 text-[#FACC15] focus:ring-[#FACC15] focus:ring-offset-black cursor-pointer accent-[#FACC15]"
+                  className="w-5 h-5 min-w-[20px] min-h-[20px] shrink-0 mt-0.5 sm:mt-0 rounded-md border-white/20 bg-black/60 text-[#FACC15] focus:ring-[#FACC15] cursor-pointer accent-[#FACC15]"
                 />
-                <div>
-                  <span className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
-                    ADD ADMISSION FEE
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-white">
+                      ADD ADMISSION FEE
+                    </span>
                     {addAdmissionFee ? (
                       <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#FACC15]/20 text-[#FACC15] border border-[#FACC15]/30">
                         + {currency} {tenantAdmissionFee.toLocaleString()}
@@ -341,34 +380,46 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
                         Rs. 0 (Unchecked)
                       </span>
                     )}
-                  </span>
+                  </div>
                   <p className="text-[10px] text-gray-400 mt-0.5">
                     Optional fee. Unchecked by default for renewals.
                   </p>
                 </div>
               </label>
 
-              {/* Real-time breakdown */}
+              {/* Pricing breakdown */}
               <div className="pt-3 border-t border-white/5 space-y-1.5 text-xs font-mono">
-                <div className="flex justify-between text-gray-400">
-                  <span>Package Fee:</span>
+                <div className="flex justify-between items-center text-gray-400">
+                  <span>Membership Fee:</span>
                   <span className="text-white font-bold">{currency} {activePackagePrice.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between text-gray-400">
+                <div className="flex justify-between items-center text-gray-400">
                   <span>Admission Fee:</span>
                   <span className={addAdmissionFee ? 'text-[#FACC15] font-bold' : 'text-gray-500 font-bold'}>
                     {addAdmissionFee ? `+ ${currency} ${tenantAdmissionFee.toLocaleString()}` : `${currency} 0`}
                   </span>
                 </div>
-                <div className="flex justify-between pt-2 border-t border-white/10 text-sm font-black">
-                  <span className="text-white uppercase font-sans">Total Amount:</span>
-                  <span className="text-[#FACC15]">{currency} {totalAmount.toLocaleString()}</span>
+                {feeCalc.paymentFee > 0 && (
+                  <>
+                    <div className="flex justify-between items-center text-gray-400">
+                      <span>Base Amount:</span>
+                      <span className="text-white font-bold">{currency} {baseAmount.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-cyan-400">
+                      <span>Payment Fee ({feeCalc.paymentFeeRate}%):</span>
+                      <span className="font-bold">+ {currency} {feeCalc.paymentFee.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
+                <div className="flex justify-between items-center pt-2 border-t border-white/10 text-sm font-black">
+                  <span className="text-white uppercase font-sans">Total Due:</span>
+                  <span className="text-[#FACC15] text-base">{currency} {totalAmount.toLocaleString()}</span>
                 </div>
               </div>
             </div>
 
-            {/* Calculations Preview */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Dates & Expiry Preview */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
                   Payment Date *
@@ -380,7 +431,7 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
                   max="2035-12-31"
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(sanitizeDateString(e.target.value))}
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-[#FACC15] focus:outline-hidden"
+                  className="w-full min-h-[44px] bg-black/40 border border-white/10 rounded-xl sm:rounded-2xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-[#FACC15] focus:outline-none"
                 />
               </div>
 
@@ -388,7 +439,7 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
                 <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
                   New Expiry Date Preview
                 </label>
-                <div className="w-full bg-black/40 border border-green-500/40 rounded-2xl px-3.5 py-2.5 text-green-400 font-mono font-black text-sm">
+                <div className="w-full min-h-[44px] bg-black/40 border border-green-500/40 rounded-xl sm:rounded-2xl px-3.5 py-2.5 text-green-400 font-mono font-black text-sm flex items-center">
                   {newCalculatedExpiry}
                 </div>
               </div>
@@ -396,28 +447,50 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
 
             {/* Payment Method */}
             <div>
-              <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
-                Payment Method *
-              </label>
-              <div className="flex gap-2">
-                {[
-                  { id: 'cash', label: 'Cash' },
-                  { id: 'bank_transfer', label: 'Bank Transfer' },
-                  { id: 'card', label: 'Card' },
-                ].map((pm) => (
-                  <button
-                    key={pm.id}
-                    type="button"
-                    onClick={() => setPaymentMethod(pm.id as any)}
-                    className={`flex-1 py-2.5 px-3 rounded-2xl border text-xs font-black uppercase tracking-wider transition-all ${
-                      paymentMethod === pm.id
-                        ? 'bg-[#FACC15] text-black border-[#FACC15]'
-                        : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    {pm.label}
-                  </button>
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
+                <label className="block text-[10px] font-black uppercase tracking-wider text-gray-400">
+                  Payment Method *
+                </label>
+                {feeCalc.paymentFee > 0 && (
+                  <span className="text-[10px] font-mono font-bold text-cyan-400">
+                    Includes {feeCalc.paymentFeeRate}% Fee ({currency} {feeCalc.paymentFee.toLocaleString()})
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5">
+                {PAYMENT_METHODS.map((pm) => {
+                  const isSelected = paymentMethod === pm.id;
+                  const rate = pm.id === 'mintpay'
+                    ? (business.paymentFeeMintpay ?? 12)
+                    : pm.id === 'payzy'
+                    ? (business.paymentFeePayzy ?? 12)
+                    : pm.id === 'koko'
+                    ? (business.paymentFeeKoko ?? 12)
+                    : 0;
+
+                  return (
+                    <button
+                      key={pm.id}
+                      type="button"
+                      onClick={() => setPaymentMethod(pm.id)}
+                      className={`min-h-[44px] p-2.5 rounded-xl sm:rounded-2xl border text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center select-none active:scale-[0.98] ${
+                        isSelected
+                          ? 'bg-[#FACC15] text-black border-[#FACC15] shadow-md shadow-[#FACC15]/20 font-black'
+                          : 'bg-black/40 border-white/10 text-gray-300 hover:text-white hover:border-white/20'
+                      }`}
+                    >
+                      <span className="truncate">{pm.label}</span>
+                      {pm.isBnplOrDigital && rate > 0 && (
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold shrink-0 ${
+                          isSelected ? 'bg-black/20 text-black' : 'bg-white/10 text-cyan-400 border border-cyan-500/20'
+                        }`}>
+                          +{rate}%
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -428,26 +501,26 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
               </label>
               <input
                 type="text"
-                placeholder="e.g. Paid in cash at reception counter"
+                placeholder="e.g. Paid at reception counter"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-2.5 text-white text-xs focus:border-[#FACC15] focus:outline-hidden"
+                className="w-full min-h-[44px] bg-black/40 border border-white/10 rounded-xl sm:rounded-2xl px-4 py-2.5 text-white text-xs focus:border-[#FACC15] focus:outline-none"
               />
             </div>
 
             {/* Buttons */}
-            <div className="pt-2 flex items-center justify-end gap-3">
+            <div className="pt-2 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-5 py-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider transition-colors"
+                className="min-h-[44px] px-5 py-2.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs sm:text-sm font-black uppercase tracking-wider transition-colors cursor-pointer text-center"
               >
                 Cancel
               </button>
               <button
                 id="btn-proceed-renewal"
                 type="submit"
-                className="px-6 py-3 rounded-full bg-[#FACC15] hover:bg-yellow-300 text-black text-xs font-black uppercase tracking-widest shadow-md shadow-[#FACC15]/20 transition-all active:scale-95"
+                className="min-h-[44px] px-6 py-2.5 rounded-full bg-[#FACC15] hover:bg-yellow-300 text-black text-xs sm:text-sm font-black uppercase tracking-widest shadow-md shadow-[#FACC15]/20 transition-all active:scale-[0.98] cursor-pointer text-center"
               >
                 Review & Confirm ({currency} {totalAmount.toLocaleString()})
               </button>

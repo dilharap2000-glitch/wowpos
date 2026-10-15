@@ -35,10 +35,10 @@ export const BarcodeModal: React.FC<BarcodeModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
       <div
         id="barcode-modal"
-        className="bg-[#121212] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+        className="bg-[#121212] border border-white/10 rounded-2xl sm:rounded-3xl w-full max-w-md overflow-hidden shadow-2xl my-auto"
       >
         {/* Header */}
         <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">

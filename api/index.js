@@ -121,37 +121,101 @@ async function setupMongoIndexes(db) {
 
 // src/lib/sms/smslen.ts
 var memorySmsLogs = [];
-async function getGymSmsConfig(gymId) {
+function normalizeSriLankanPhone(rawPhone) {
+  if (!rawPhone) return "";
+  const cleaned = rawPhone.trim().replace(/[\s\-\(\)\.]/g, "");
+  if (cleaned.startsWith("+94")) {
+    return "+94" + cleaned.slice(3).replace(/\D/g, "");
+  }
+  if (cleaned.startsWith("0094")) {
+    return "+94" + cleaned.slice(4).replace(/\D/g, "");
+  }
+  if (cleaned.startsWith("94")) {
+    return "+94" + cleaned.slice(2).replace(/\D/g, "");
+  }
+  if (cleaned.startsWith("0")) {
+    return "+94" + cleaned.slice(1).replace(/\D/g, "");
+  }
+  if (/^7\d{8}$/.test(cleaned)) {
+    return "+94" + cleaned;
+  }
+  if (cleaned.startsWith("+")) {
+    return "+" + cleaned.slice(1).replace(/\D/g, "");
+  }
+  const digitsOnly = cleaned.replace(/\D/g, "");
+  if (digitsOnly.length === 9 && digitsOnly.startsWith("7")) {
+    return "+94" + digitsOnly;
+  }
+  if (digitsOnly.length === 10 && digitsOnly.startsWith("0")) {
+    return "+94" + digitsOnly.slice(1);
+  }
+  if (digitsOnly.length === 11 && digitsOnly.startsWith("94")) {
+    return "+" + digitsOnly;
+  }
+  return cleaned;
+}
+function maskPhoneNumber(phone) {
+  if (!phone) return "";
+  const clean = phone.trim();
+  if (clean.length <= 6) return "****";
+  const start = clean.slice(0, 5);
+  const end = clean.slice(-3);
+  return `${start}****${end}`;
+}
+function sanitizeSensitiveText(text, sensitiveKey) {
+  if (!text) return "";
+  let cleaned = text;
+  if (sensitiveKey && sensitiveKey.length >= 4) {
+    cleaned = cleaned.replaceAll(sensitiveKey, "[REDACTED_API_KEY]");
+  }
+  cleaned = cleaned.replace(/(["']?api[_-]?key["']?\s*[:=]\s*["'])([^"'&\s]+)(["']?)/gi, "$1[REDACTED_API_KEY]$3");
+  cleaned = cleaned.replace(/(api_key=)([^&\s]+)/gi, "$1[REDACTED_API_KEY]");
+  return cleaned;
+}
+async function getGymSmsConfig(gymIdOrBusinessId = 1) {
   try {
     const db = await getMongoDb();
-    const businessId = `biz_${gymId}`;
+    const gymId = typeof gymIdOrBusinessId === "number" ? gymIdOrBusinessId : parseInt(String(gymIdOrBusinessId).replace(/\D/g, ""), 10) || 1;
+    const businessId = typeof gymIdOrBusinessId === "string" && gymIdOrBusinessId.startsWith("biz_") ? gymIdOrBusinessId : `biz_${gymId}`;
     let g = null;
-    let setMap = /* @__PURE__ */ new Map();
+    const setMap = /* @__PURE__ */ new Map();
     if (db) {
       g = await db.collection("businesses").findOne({ $or: [{ id: gymId }, { businessId }] });
       const gymSettings = await db.collection("settings").find({ $or: [{ gymId }, { businessId }] }).toArray();
       gymSettings.forEach((s) => setMap.set(s.key, s.value));
     }
     const active = setMap.get("sms_active") !== void 0 ? setMap.get("sms_active") === "true" : (g?.smsEnabled ?? "true") === "true";
+    const rawApiKey = setMap.get("sms_api_key") || g?.smsApiKey || process.env.SMSLENZ_API_KEY || process.env.SMSLEN_API_KEY || "";
+    const rawUserId = setMap.get("sms_user_id") || g?.smsUserId || process.env.SMSLENZ_USER_ID || process.env.SMSLEN_USER_ID || "";
+    let configuredSenderId = setMap.get("sms_sender_id") || g?.smsSenderId || process.env.SMSLEN_SENDER_ID || "ZENERGY GYM";
+    if (!configuredSenderId || configuredSenderId === "GYMFIT" || configuredSenderId === "TITANFIT" || configuredSenderId === "WOWPOS" || configuredSenderId === "SMSlenzDEMO") {
+      configuredSenderId = "ZENERGY GYM";
+    }
+    let configuredUrl = setMap.get("sms_api_url") || g?.smsUrl || process.env.SMSLEN_API_URL || "https://www.smslenz.lk/api/send-sms";
+    if (!configuredUrl || configuredUrl.includes("api.smslen.com")) {
+      configuredUrl = "https://www.smslenz.lk/api/send-sms";
+    }
+    const providerName = setMap.get("sms_provider_name") || "SMSlenz Sri Lanka";
+    const apiMethod = (setMap.get("sms_api_method") || "POST").toUpperCase();
     return {
       active,
-      apiKey: setMap.get("sms_api_key") || g?.smsApiKey || process.env.SMSLEN_API_KEY || "",
-      userId: setMap.get("sms_user_id") || "",
-      senderId: setMap.get("sms_sender_id") || g?.smsSenderId || "WOWPOS",
-      providerName: setMap.get("sms_provider_name") || "SMS Gateway",
-      apiUrl: setMap.get("sms_api_url") || g?.smsUrl || "https://api.smslen.com/v1/send",
-      apiMethod: setMap.get("sms_api_method") || "POST",
+      apiKey: rawApiKey,
+      userId: rawUserId,
+      senderId: configuredSenderId,
+      providerName,
+      apiUrl: configuredUrl,
+      apiMethod,
       customParams: setMap.get("sms_custom_params") || ""
     };
   } catch (err) {
     console.error("Failed to load gym SMS config:", err);
     return {
       active: true,
-      apiKey: "",
-      userId: "",
-      senderId: "WOWPOS",
-      providerName: "Custom Gateway",
-      apiUrl: "https://api.smslen.com/v1/send",
+      apiKey: process.env.SMSLENZ_API_KEY || process.env.SMSLEN_API_KEY || "",
+      userId: process.env.SMSLENZ_USER_ID || process.env.SMSLEN_USER_ID || "",
+      senderId: "ZENERGY GYM",
+      providerName: "SMSlenz Sri Lanka",
+      apiUrl: "https://www.smslenz.lk/api/send-sms",
       apiMethod: "POST"
     };
   }
@@ -159,129 +223,294 @@ async function getGymSmsConfig(gymId) {
 async function sendSms(params) {
   const { gymId = 1, memberId, phone, messageType, message } = params;
   const config2 = await getGymSmsConfig(gymId);
-  let cleanPhone = phone.replace(/[^0-9+]/g, "");
-  if (cleanPhone.startsWith("0") && cleanPhone.length === 10) {
-    cleanPhone = "+94" + cleanPhone.substring(1);
-  }
+  const normalizedPhone = normalizeSriLankanPhone(phone);
+  const maskedPhone = maskPhoneNumber(normalizedPhone);
+  const endpointUrl = config2.apiUrl || "https://www.smslenz.lk/api/send-sms";
+  const senderId = config2.senderId || "ZENERGY GYM";
   const logEntry = {
     id: Date.now(),
     businessId: `biz_${gymId}`,
     gymId,
     memberId: memberId || null,
-    phone: cleanPhone,
+    phone: maskedPhone,
+    // RECIPIENT NUMBER MASKED IN LOGS
+    senderId,
     messageType,
     message,
-    status: "pending",
+    httpStatus: 0,
+    success: false,
+    providerStatus: "pending",
+    campaignId: null,
+    status: "failed",
+    errorMessage: null,
+    apiResponse: null,
     createdAt: /* @__PURE__ */ new Date()
   };
   if (!config2.active) {
-    console.log(`[SMS Inactive for Gym ${gymId}] Skip sending to ${cleanPhone}: ${message}`);
-    logEntry.errorMessage = "SMS Gateway is currently Inactive (OFF) in Gym Settings";
+    const errorMsg = "SMS Gateway is currently Inactive (OFF) in Gym Settings";
+    logEntry.errorMessage = errorMsg;
     logEntry.status = "failed";
-    const db = await getMongoDb();
-    if (db) {
-      await db.collection("smsLogs").insertOne(logEntry);
-    } else {
-      memorySmsLogs.push(logEntry);
-    }
+    logEntry.providerStatus = "disabled";
+    await saveSmsLog(logEntry);
     return {
       success: false,
+      httpStatus: 0,
+      apiStatus: "Gateway Disabled",
+      providerStatus: "inactive",
+      campaignId: null,
+      maskedRecipient: maskedPhone,
+      senderId,
+      endpoint: endpointUrl,
       status: "failed",
-      error: "SMS Gateway is Inactive. Enable Active toggle in SMS Gateway settings.",
+      error: errorMsg,
+      logId: logEntry.id
+    };
+  }
+  if (!normalizedPhone || normalizedPhone.length < 10) {
+    const errorMsg = `Invalid phone number format: "${phone}". Expected Sri Lankan mobile number (e.g. 0771234567 or +94771234567).`;
+    logEntry.errorMessage = errorMsg;
+    logEntry.status = "failed";
+    logEntry.providerStatus = "invalid_recipient";
+    await saveSmsLog(logEntry);
+    return {
+      success: false,
+      httpStatus: 400,
+      apiStatus: "HTTP 400 Bad Request (Validation)",
+      providerStatus: "invalid_recipient",
+      campaignId: null,
+      maskedRecipient: maskedPhone || phone,
+      senderId,
+      endpoint: endpointUrl,
+      status: "failed",
+      error: errorMsg,
       logId: logEntry.id
     };
   }
   try {
-    let apiResponse = "";
-    let success = false;
+    let httpStatus = 0;
+    let rawResponseText = "";
+    let responseJson = null;
+    let providerStatus = "unknown";
+    let campaignId = null;
+    let isSuccess = false;
+    let isDelivered = false;
     let errorMessage;
-    const isLiveGateway = Boolean(config2.apiKey && config2.apiKey !== "DEMO_KEY_SMSLEN_SRILANKA") && Boolean(config2.apiUrl);
-    if (isLiveGateway) {
+    const hasLiveCredentials = Boolean(config2.apiKey && config2.userId);
+    if (hasLiveCredentials) {
+      if (config2.apiMethod === "GET") {
+        const urlObj = new URL(endpointUrl);
+        urlObj.searchParams.set("user_id", config2.userId);
+        urlObj.searchParams.set("api_key", config2.apiKey);
+        urlObj.searchParams.set("sender_id", senderId);
+        urlObj.searchParams.set("contact", normalizedPhone);
+        urlObj.searchParams.set("message", message);
+        const response = await fetch(urlObj.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json, text/plain, */*"
+          }
+        });
+        httpStatus = response.status;
+        rawResponseText = await response.text();
+      } else {
+        const payload = {
+          user_id: config2.userId,
+          api_key: config2.apiKey,
+          sender_id: senderId,
+          contact: normalizedPhone,
+          message
+        };
+        const response = await fetch(endpointUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json, text/plain, */*"
+          },
+          body: JSON.stringify(payload)
+        });
+        httpStatus = response.status;
+        rawResponseText = await response.text();
+      }
       try {
-        if (config2.apiMethod === "GET") {
-          const urlObj = new URL(config2.apiUrl);
-          urlObj.searchParams.set("api_key", config2.apiKey);
-          urlObj.searchParams.set("apikey", config2.apiKey);
-          if (config2.userId) urlObj.searchParams.set("user_id", config2.userId);
-          urlObj.searchParams.set("sender_id", config2.senderId);
-          urlObj.searchParams.set("to", cleanPhone);
-          urlObj.searchParams.set("recipient", cleanPhone);
-          urlObj.searchParams.set("message", message);
-          const response = await fetch(urlObj.toString(), {
-            method: "GET",
-            headers: {
-              Accept: "application/json, text/plain, */*"
+        responseJson = JSON.parse(rawResponseText);
+      } catch {
+        responseJson = null;
+      }
+      if (responseJson) {
+        campaignId = responseJson.campaign_id ?? responseJson.campaignId ?? responseJson.data?.campaign_id ?? responseJson.data?.campaignId ?? responseJson.id ?? null;
+        providerStatus = responseJson.status ?? responseJson.provider_status ?? responseJson.delivery_status ?? (httpStatus >= 200 && httpStatus < 300 ? "accepted" : "error");
+        if (httpStatus >= 200 && httpStatus < 300) {
+          if (responseJson.success !== false && responseJson.status !== "error" && !responseJson.errors) {
+            isSuccess = true;
+            if (responseJson.delivery_status === "delivered" || responseJson.status === "delivered") {
+              isDelivered = true;
             }
-          });
-          const rawText = await response.text();
-          apiResponse = rawText;
-          success = response.ok;
-          if (!success) {
-            errorMessage = `Gateway HTTP ${response.status}: ${rawText.slice(0, 120)}`;
+          } else {
+            isSuccess = false;
+            errorMessage = extractErrorMessage(responseJson) || "Gateway returned an error";
           }
         } else {
-          const postBody = {
-            api_key: config2.apiKey,
-            sender_id: config2.senderId,
-            recipient: cleanPhone,
-            to: cleanPhone,
-            message
-          };
-          if (config2.userId) postBody.user_id = config2.userId;
-          const response = await fetch(config2.apiUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${config2.apiKey}`
-            },
-            body: JSON.stringify(postBody)
-          });
-          const rawText = await response.text();
-          apiResponse = rawText;
-          success = response.ok;
-          if (!success) {
-            errorMessage = `Gateway HTTP ${response.status}: ${rawText.slice(0, 120)}`;
-          }
+          isSuccess = false;
+          errorMessage = extractErrorMessage(responseJson) || `SMSlenz Gateway returned HTTP ${httpStatus}`;
         }
-      } catch (networkErr) {
-        apiResponse = JSON.stringify({ error: networkErr.message });
-        errorMessage = networkErr.message;
-        success = false;
+      } else {
+        if (httpStatus >= 200 && httpStatus < 300) {
+          isSuccess = true;
+          providerStatus = "accepted";
+        } else {
+          isSuccess = false;
+          providerStatus = `http_error_${httpStatus}`;
+          errorMessage = `Gateway HTTP ${httpStatus}: ${rawResponseText.slice(0, 150)}`;
+        }
       }
     } else {
-      apiResponse = JSON.stringify({
-        status: "success",
-        provider: config2.providerName || "WOW POS Simulated SMS Gateway",
-        gateway_status: "active",
-        sender: config2.senderId,
-        recipient: cleanPhone,
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      success = true;
+      httpStatus = 400;
+      providerStatus = "missing_credentials";
+      errorMessage = "SMSlenz User ID and API Key are required. Please configure them in SMS Gateway Settings or environment.";
+      isSuccess = false;
     }
-    logEntry.status = success ? "sent" : "failed";
-    logEntry.apiResponse = apiResponse.slice(0, 1e3);
-    logEntry.errorMessage = errorMessage || null;
+    const sanitizedApiResponse = sanitizeSensitiveText(
+      responseJson ? JSON.stringify(responseJson) : rawResponseText,
+      config2.apiKey
+    );
+    const sanitizedError = errorMessage ? sanitizeSensitiveText(errorMessage, config2.apiKey) : void 0;
+    const finalStatus = isSuccess ? isDelivered ? "delivered" : "accepted" : "failed";
+    const apiStatusText = isSuccess ? `HTTP ${httpStatus} OK (Accepted by SMSlenz Gateway)` : httpStatus > 0 ? `HTTP ${httpStatus} (${providerStatus})` : "Gateway Communication Error";
+    logEntry.httpStatus = httpStatus;
+    logEntry.success = isSuccess;
+    logEntry.providerStatus = providerStatus;
+    logEntry.campaignId = campaignId ? String(campaignId) : null;
+    logEntry.status = finalStatus;
+    logEntry.errorMessage = sanitizedError || null;
+    logEntry.apiResponse = sanitizedApiResponse.slice(0, 500);
+    await saveSmsLog(logEntry);
+    return {
+      success: isSuccess,
+      httpStatus,
+      apiStatus: apiStatusText,
+      providerStatus,
+      campaignId: campaignId ? String(campaignId) : null,
+      maskedRecipient: maskedPhone,
+      senderId,
+      endpoint: endpointUrl,
+      status: finalStatus,
+      error: sanitizedError,
+      logId: logEntry.id,
+      apiResponse: sanitizedApiResponse
+    };
+  } catch (networkErr) {
+    const errorMsg = sanitizeSensitiveText(networkErr.message || "Network request failed", config2.apiKey);
+    logEntry.httpStatus = 500;
+    logEntry.success = false;
+    logEntry.status = "failed";
+    logEntry.providerStatus = "network_failure";
+    logEntry.errorMessage = errorMsg;
+    await saveSmsLog(logEntry);
+    return {
+      success: false,
+      httpStatus: 500,
+      apiStatus: "Network Error",
+      providerStatus: "network_failure",
+      campaignId: null,
+      maskedRecipient: maskedPhone,
+      senderId,
+      endpoint: endpointUrl,
+      status: "failed",
+      error: errorMsg,
+      logId: logEntry.id
+    };
+  }
+}
+function extractErrorMessage(responseJson) {
+  if (!responseJson) return null;
+  if (responseJson.errors && typeof responseJson.errors === "object") {
+    const errorList = Object.values(responseJson.errors).flat().join(", ");
+    if (errorList) return errorList;
+  }
+  if (responseJson.message && typeof responseJson.message === "string") {
+    return responseJson.message;
+  }
+  if (responseJson.error && typeof responseJson.error === "string") {
+    return responseJson.error;
+  }
+  return null;
+}
+async function checkAccountStatus(gymIdOrBusinessId = 1) {
+  const config2 = await getGymSmsConfig(gymIdOrBusinessId);
+  if (!config2.apiKey || !config2.userId) {
+    return {
+      success: false,
+      httpStatus: 400,
+      providerStatus: "missing_credentials",
+      error: "SMSlenz User ID and API Key must be configured to check account status."
+    };
+  }
+  const endpoint = "https://www.smslenz.lk/api/account-status";
+  try {
+    const payload = {
+      user_id: config2.userId,
+      api_key: config2.apiKey
+    };
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    const httpStatus = response.status;
+    const rawText = await response.text();
+    let responseJson = null;
+    try {
+      responseJson = JSON.parse(rawText);
+    } catch {
+      responseJson = null;
+    }
+    const sanitizedText = sanitizeSensitiveText(rawText, config2.apiKey);
+    return {
+      success: response.ok,
+      httpStatus,
+      endpoint,
+      data: responseJson || sanitizedText,
+      error: !response.ok ? extractErrorMessage(responseJson) || `HTTP ${httpStatus}` : void 0
+    };
+  } catch (err) {
+    return {
+      success: false,
+      httpStatus: 500,
+      endpoint,
+      error: sanitizeSensitiveText(err.message || "Account status check failed", config2.apiKey)
+    };
+  }
+}
+async function getSmsLogs(gymIdOrBusinessId = 1) {
+  try {
+    const db = await getMongoDb();
+    const gymId = typeof gymIdOrBusinessId === "number" ? gymIdOrBusinessId : parseInt(String(gymIdOrBusinessId).replace(/\D/g, ""), 10) || 1;
+    const businessId = typeof gymIdOrBusinessId === "string" && gymIdOrBusinessId.startsWith("biz_") ? gymIdOrBusinessId : `biz_${gymId}`;
+    if (db) {
+      const logs = await db.collection("smsLogs").find({ $or: [{ gymId }, { businessId }] }).sort({ createdAt: -1 }).limit(100).toArray();
+      return logs;
+    }
+    return memorySmsLogs.filter((l) => l.gymId === gymId || l.businessId === businessId).slice(-100).reverse();
+  } catch (err) {
+    console.error("Error fetching SMS logs:", err);
+    return memorySmsLogs.slice(-100).reverse();
+  }
+}
+async function saveSmsLog(logEntry) {
+  try {
     const db = await getMongoDb();
     if (db) {
       await db.collection("smsLogs").insertOne(logEntry);
     } else {
       memorySmsLogs.push(logEntry);
+      if (memorySmsLogs.length > 500) memorySmsLogs.shift();
     }
-    return {
-      success,
-      status: success ? "sent" : "failed",
-      error: errorMessage,
-      logId: logEntry.id,
-      apiResponse
-    };
-  } catch (dbErr) {
-    console.error("Error in sendSms execution:", dbErr);
-    return {
-      success: false,
-      status: "failed",
-      error: dbErr.message
-    };
+  } catch (err) {
+    console.error("Failed to persist SMS log:", err);
+    memorySmsLogs.push(logEntry);
   }
 }
 
@@ -353,6 +582,9 @@ var initialStore = {
       timezone: "Asia/Colombo",
       description: "High-Energy Functional Fitness, Strength & Conditioning",
       receiptFooter: "Thank you for training with ZENERGY FITNESS! Goods sold are exchangeable within 7 days.",
+      smsSenderId: "ZENERGY GYM",
+      smsUrl: "https://www.smslenz.lk/api/send-sms",
+      smsEnabled: "true",
       createdAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
     },
@@ -1251,6 +1483,11 @@ var initialStore = {
     { businessId: "biz_1", gymId: 1, key: "description", value: "High-Energy Functional Fitness, Strength & Conditioning" },
     { businessId: "biz_1", gymId: 1, key: "admission_fee", value: "1000" },
     { businessId: "biz_1", gymId: 1, key: "receipt_footer", value: "Thank you for training with ZENERGY FITNESS! Goods sold are exchangeable within 7 days." },
+    { businessId: "biz_1", gymId: 1, key: "sms_sender_id", value: "ZENERGY GYM" },
+    { businessId: "biz_1", gymId: 1, key: "sms_api_url", value: "https://www.smslenz.lk/api/send-sms" },
+    { businessId: "biz_1", gymId: 1, key: "sms_provider_name", value: "SMSlenz Sri Lanka" },
+    { businessId: "biz_1", gymId: 1, key: "sms_api_method", value: "POST" },
+    { businessId: "biz_1", gymId: 1, key: "sms_active", value: "true" },
     // POWER FITNESS (biz_2)
     { businessId: "biz_2", gymId: 2, key: "gym_name", value: "POWER FITNESS" },
     { businessId: "biz_2", gymId: 2, key: "currency", value: "Rs." },
@@ -2527,6 +2764,16 @@ var GymService = class {
     if (data.currency !== void 0) updates.currency = data.currency ? data.currency.trim() : "Rs.";
     if (data.description !== void 0) updates.description = data.description ? data.description.trim() : null;
     if (data.receiptFooter !== void 0) updates.receiptFooter = data.receiptFooter;
+    if (data.smsUrl !== void 0) updates.smsUrl = data.smsUrl;
+    if (data.smsSenderId !== void 0) updates.smsSenderId = data.smsSenderId;
+    if (data.smsEnabled !== void 0) updates.smsEnabled = data.smsEnabled;
+    if (data.smsApiKey !== void 0) {
+      const trimmed = String(data.smsApiKey).trim();
+      if (trimmed && !/^[•*]+$/.test(trimmed)) {
+        updates.smsApiKey = trimmed;
+      }
+    }
+    if (data.smsUserId !== void 0) updates.smsUserId = data.smsUserId;
     if (data.monthlyPrice !== void 0) updates.monthlyPrice = Math.round(Number(data.monthlyPrice));
     if (data.threeMonthsPrice !== void 0) updates.threeMonthsPrice = Math.round(Number(data.threeMonthsPrice));
     if (data.sixMonthsPrice !== void 0) updates.sixMonthsPrice = Math.round(Number(data.sixMonthsPrice));
@@ -2604,6 +2851,12 @@ var GymService = class {
     const gymId = resolveGymId(gymIdOrBusinessId);
     if (db) {
       for (const [key, value] of Object.entries(updates)) {
+        if (key === "sms_api_key") {
+          const trimmed = String(value).trim();
+          if (!trimmed || /^[•*]+$/.test(trimmed)) {
+            continue;
+          }
+        }
         await db.collection("settings").updateOne(
           { businessId, key },
           { $set: { businessId, gymId, key, value, updatedAt: /* @__PURE__ */ new Date() } },
@@ -2612,6 +2865,12 @@ var GymService = class {
       }
     } else {
       for (const [key, value] of Object.entries(updates)) {
+        if (key === "sms_api_key") {
+          const trimmed = String(value).trim();
+          if (!trimmed || /^[•*]+$/.test(trimmed)) {
+            continue;
+          }
+        }
         const existing = mem.settings.find((s) => s.businessId === businessId && s.key === key);
         if (existing) {
           existing.value = value;
@@ -3953,7 +4212,10 @@ app.get("/api/reports", requireAuth, requireGymTenant, async (req, res) => {
 });
 app.get("/api/sms/logs", requireAuth, requireGymTenant, async (req, res) => {
   try {
-    res.json([]);
+    const gymId = req.gymId || 1;
+    const businessId = req.businessId || resolveBusinessId(gymId);
+    const logs = await getSmsLogs(businessId || gymId);
+    res.json(logs);
   } catch (err) {
     console.error("Error fetching SMS logs:", err);
     res.status(500).json({ error: err.message || "Failed to load SMS logs" });
@@ -3964,7 +4226,7 @@ app.post("/api/sms/test", requireAuth, requireGymTenant, async (req, res) => {
     const gymId = req.gymId || 1;
     const { phone, message } = req.body;
     if (!phone || !message) {
-      return res.status(400).json({ error: "Phone and message are required" });
+      return res.status(400).json({ error: "Phone number and test message are required" });
     }
     const result = await sendSms({
       gymId,
@@ -3978,11 +4240,32 @@ app.post("/api/sms/test", requireAuth, requireGymTenant, async (req, res) => {
     res.status(500).json({ error: err.message || "Failed to send test SMS" });
   }
 });
+app.get("/api/sms/account-status", requireAuth, requireGymTenant, async (req, res) => {
+  try {
+    const gymId = req.gymId || 1;
+    const result = await checkAccountStatus(gymId);
+    res.json(result);
+  } catch (err) {
+    console.error("Error checking SMS account status:", err);
+    res.status(500).json({ error: err.message || "Failed to check account status" });
+  }
+});
+app.post("/api/sms/account-status", requireAuth, requireGymTenant, async (req, res) => {
+  try {
+    const gymId = req.gymId || 1;
+    const result = await checkAccountStatus(gymId);
+    res.json(result);
+  } catch (err) {
+    console.error("Error checking SMS account status:", err);
+    res.status(500).json({ error: err.message || "Failed to check account status" });
+  }
+});
 app.get("/api/settings", requireAuth, requireGymTenant, async (req, res) => {
   try {
     const businessId = req.businessId || resolveBusinessId(req.gymId);
     const gymDetails = await GymService.getGymDetails(businessId);
-    const map = {};
+    const storedSettings = await GymService.getSettings(businessId);
+    const map = { ...storedSettings };
     if (gymDetails) {
       map["gym_name"] = gymDetails.gymName || "";
       map["logo"] = gymDetails.logo || "";
@@ -3993,10 +4276,18 @@ app.get("/api/settings", requireAuth, requireGymTenant, async (req, res) => {
       map["description"] = gymDetails.description || "";
       map["timezone"] = gymDetails.timezone || "Asia/Colombo";
       map["receipt_footer"] = gymDetails.receiptFooter || "Thank you for training with us!";
-      map["sms_url"] = gymDetails.smsUrl || "https://api.smslen.com/v1/send";
-      map["sms_api_key"] = gymDetails.smsApiKey || "";
-      map["sms_sender_id"] = gymDetails.smsSenderId || "GYMFIT";
-      map["sms_enabled"] = gymDetails.smsEnabled || "true";
+      map["sms_url"] = storedSettings["sms_api_url"] || storedSettings["sms_url"] || gymDetails.smsUrl || "https://www.smslenz.lk/api/send-sms";
+      map["sms_api_url"] = map["sms_url"];
+      map["sms_sender_id"] = storedSettings["sms_sender_id"] || gymDetails.smsSenderId || "ZENERGY GYM";
+      map["sms_provider_name"] = storedSettings["sms_provider_name"] || "SMSlenz Sri Lanka";
+      map["sms_api_method"] = storedSettings["sms_api_method"] || "POST";
+      map["sms_user_id"] = storedSettings["sms_user_id"] || process.env.SMSLENZ_USER_ID || process.env.SMSLEN_USER_ID || "";
+      map["sms_enabled"] = storedSettings["sms_active"] || storedSettings["sms_enabled"] || gymDetails.smsEnabled || "true";
+      map["sms_active"] = map["sms_enabled"];
+      const rawKey = storedSettings["sms_api_key"] || gymDetails.smsApiKey || process.env.SMSLENZ_API_KEY || process.env.SMSLEN_API_KEY || "";
+      const hasApiKey = Boolean(rawKey && rawKey.length > 0);
+      map["sms_has_api_key"] = hasApiKey ? "true" : "false";
+      map["sms_api_key"] = hasApiKey ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "";
       map["monthly_price"] = String(gymDetails.monthlyPrice || 4500);
       map["three_months_price"] = String(gymDetails.threeMonthsPrice || 12e3);
       map["six_months_price"] = String(gymDetails.sixMonthsPrice || 22e3);
@@ -4017,6 +4308,25 @@ app.put("/api/settings", requireAuth, requireGymTenant, requireRoles("SUPER_ADMI
   try {
     const businessId = req.businessId || resolveBusinessId(req.gymId);
     const updates = req.body;
+    const candidateApiKey = updates["sms_api_key"];
+    let safeApiKey = void 0;
+    if (typeof candidateApiKey === "string") {
+      const trimmedKey = candidateApiKey.trim();
+      if (trimmedKey && !/^[•*]+$/.test(trimmedKey)) {
+        safeApiKey = trimmedKey;
+      }
+    }
+    const settingsToSave = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (typeof v === "string") {
+        if (k === "sms_api_key") {
+          if (safeApiKey !== void 0) settingsToSave[k] = safeApiKey;
+        } else {
+          settingsToSave[k] = v;
+        }
+      }
+    }
+    await GymService.updateSettings(businessId, settingsToSave);
     const updatedGym = await GymService.updateGymDetails(businessId, {
       gymName: updates["gym_name"],
       logo: updates["logo"],
@@ -4026,10 +4336,11 @@ app.put("/api/settings", requireAuth, requireGymTenant, requireRoles("SUPER_ADMI
       description: updates["description"],
       currency: updates["currency"],
       receiptFooter: updates["receipt_footer"],
-      smsUrl: updates["sms_url"],
-      smsApiKey: updates["sms_api_key"],
-      smsSenderId: updates["sms_sender_id"],
-      smsEnabled: updates["sms_enabled"],
+      smsUrl: updates["sms_api_url"] || updates["sms_url"] || "https://www.smslenz.lk/api/send-sms",
+      smsApiKey: safeApiKey,
+      // only updates if not masked
+      smsSenderId: updates["sms_sender_id"] || "ZENERGY GYM",
+      smsEnabled: updates["sms_active"] || updates["sms_enabled"],
       monthlyPrice: updates["monthly_price"] !== void 0 ? Number(updates["monthly_price"]) : void 0,
       threeMonthsPrice: updates["three_months_price"] !== void 0 ? Number(updates["three_months_price"]) : void 0,
       sixMonthsPrice: updates["six_months_price"] !== void 0 ? Number(updates["six_months_price"]) : void 0,

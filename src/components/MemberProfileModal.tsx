@@ -73,10 +73,10 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
   if (!isOpen || !memberId) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 md:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
       <div
         id="member-profile-modal"
-        className="bg-[#121212] border border-white/10 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl my-8 flex flex-col max-h-[90vh]"
+        className="bg-[#121212] border border-white/10 rounded-2xl sm:rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl my-auto flex flex-col max-h-[96vh] sm:max-h-[90vh]"
       >
         {/* Header */}
         <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02] shrink-0">
