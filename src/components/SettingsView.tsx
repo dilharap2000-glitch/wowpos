@@ -31,14 +31,17 @@ import {
   UserCheck,
   UserCog,
   Lock,
+  CreditCard,
+  Percent,
 } from 'lucide-react';
 import { api } from '../lib/api.ts';
 import { SmsLog } from '../types.ts';
 import { useBusiness } from '../context/BusinessContext.tsx';
+import { PAYMENT_METHODS, calculatePaymentFee, runFeeVerificationTests } from '../lib/payment-fee.ts';
 
 export const SettingsView: React.FC = () => {
   const { business, updateBusiness, loading: businessLoading } = useBusiness();
-  const [activeTab, setActiveTab] = useState<'gym_profile' | 'admin_profile' | 'sms_gateway' | 'sms_logs' | 'staff'>('gym_profile');
+  const [activeTab, setActiveTab] = useState<'gym_profile' | 'payment_fees' | 'admin_profile' | 'sms_gateway' | 'sms_logs' | 'staff'>('gym_profile');
   const [settingsMap, setSettingsMap] = useState<Record<string, string>>({});
   const [smsLogs, setSmsLogs] = useState<SmsLog[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -46,6 +49,16 @@ export const SettingsView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+
+  // Payment Method Fee Settings Fields
+  const [feeMintpay, setFeeMintpay] = useState(business.paymentFeeMintpay ?? 12);
+  const [feePayzy, setFeePayzy] = useState(business.paymentFeePayzy ?? 12);
+  const [feeKoko, setFeeKoko] = useState(business.paymentFeeKoko ?? 12);
+  const [enabledMintpay, setEnabledMintpay] = useState(business.paymentFeeEnabledMintpay ?? true);
+  const [enabledPayzy, setEnabledPayzy] = useState(business.paymentFeeEnabledPayzy ?? true);
+  const [enabledKoko, setEnabledKoko] = useState(business.paymentFeeEnabledKoko ?? true);
+  const [savingPaymentFees, setSavingPaymentFees] = useState(false);
+  const [paymentFeeSaveSuccess, setPaymentFeeSaveSuccess] = useState(false);
 
   // Business & Gym Profile Fields
   const [gymName, setGymName] = useState(business.gymName || 'ZENERGY FITNESS');
@@ -123,8 +136,38 @@ export const SettingsView: React.FC = () => {
       if (business.coupleThreeMonthsPrice !== undefined) setCoupleThreeMonthsPrice(business.coupleThreeMonthsPrice);
       if (business.coupleSixMonthsPrice !== undefined) setCoupleSixMonthsPrice(business.coupleSixMonthsPrice);
       if (business.coupleAnnualPrice !== undefined) setCoupleAnnualPrice(business.coupleAnnualPrice);
+      if (business.paymentFeeMintpay !== undefined) setFeeMintpay(business.paymentFeeMintpay);
+      if (business.paymentFeePayzy !== undefined) setFeePayzy(business.paymentFeePayzy);
+      if (business.paymentFeeKoko !== undefined) setFeeKoko(business.paymentFeeKoko);
+      if (business.paymentFeeEnabledMintpay !== undefined) setEnabledMintpay(business.paymentFeeEnabledMintpay);
+      if (business.paymentFeeEnabledPayzy !== undefined) setEnabledPayzy(business.paymentFeeEnabledPayzy);
+      if (business.paymentFeeEnabledKoko !== undefined) setEnabledKoko(business.paymentFeeEnabledKoko);
     }
   }, [business]);
+
+  const handleSavePaymentFees = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setSavingPaymentFees(true);
+    setPaymentFeeSaveSuccess(false);
+
+    try {
+      await updateBusiness({
+        paymentFeeMintpay: Number(feeMintpay),
+        paymentFeePayzy: Number(feePayzy),
+        paymentFeeKoko: Number(feeKoko),
+        paymentFeeEnabledMintpay: Boolean(enabledMintpay),
+        paymentFeeEnabledPayzy: Boolean(enabledPayzy),
+        paymentFeeEnabledKoko: Boolean(enabledKoko),
+      });
+
+      setPaymentFeeSaveSuccess(true);
+      setTimeout(() => setPaymentFeeSaveSuccess(false), 4000);
+    } catch (err: any) {
+      alert(err.message || 'Failed to save payment fee settings.');
+    } finally {
+      setSavingPaymentFees(false);
+    }
+  };
 
   useEffect(() => {
     loadSettings();
@@ -489,6 +532,17 @@ export const SettingsView: React.FC = () => {
             Business & Branding
           </button>
           <button
+            onClick={() => setActiveTab('payment_fees')}
+            className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center gap-2 shrink-0 ${
+              activeTab === 'payment_fees'
+                ? 'bg-[#FACC15] text-black shadow-lg shadow-[#FACC15]/20'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            Payment Methods & Fees
+          </button>
+          <button
             onClick={() => setActiveTab('admin_profile')}
             className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center gap-2 shrink-0 ${
               activeTab === 'admin_profile'
@@ -534,6 +588,26 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Save Notification Toast: Payment Fees */}
+      {paymentFeeSaveSuccess && (
+        <div className="p-4 bg-emerald-950/90 border border-emerald-600/50 text-emerald-300 rounded-2xl flex items-center justify-between shadow-xl animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-bold text-sm text-white">Payment Fee Settings Saved Successfully!</p>
+              <p className="text-xs text-emerald-300/80">
+                Payment methods, fee rates (Mintpay, PayZy, Koko 12%), and status rules synced to MongoDB Atlas.
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 bg-emerald-900/50 px-2.5 py-1 rounded-full border border-emerald-700/50">
+            MongoDB Atlas Synced
+          </span>
+        </div>
+      )}
 
       {/* Save Notification Toast: Business */}
       {saveSuccess && (

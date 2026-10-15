@@ -160,6 +160,15 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
       if (updates.coupleThreeMonthsPrice !== undefined) payload['couple_three_months_price'] = String(updates.coupleThreeMonthsPrice);
       if (updates.coupleSixMonthsPrice !== undefined) payload['couple_six_months_price'] = String(updates.coupleSixMonthsPrice);
       if (updates.coupleAnnualPrice !== undefined) payload['couple_annual_price'] = String(updates.coupleAnnualPrice);
+      if (updates.paymentFeeMintpay !== undefined) payload['payment_fee_mintpay'] = String(updates.paymentFeeMintpay);
+      if (updates.paymentFeePayzy !== undefined) payload['payment_fee_payzy'] = String(updates.paymentFeePayzy);
+      if (updates.paymentFeeKoko !== undefined) payload['payment_fee_koko'] = String(updates.paymentFeeKoko);
+      if (updates.paymentFeeCash !== undefined) payload['payment_fee_cash'] = String(updates.paymentFeeCash);
+      if (updates.paymentFeeCard !== undefined) payload['payment_fee_card'] = String(updates.paymentFeeCard);
+      if (updates.paymentFeeBankTransfer !== undefined) payload['payment_fee_bank_transfer'] = String(updates.paymentFeeBankTransfer);
+      if (updates.paymentFeeEnabledMintpay !== undefined) payload['payment_fee_enabled_mintpay'] = String(updates.paymentFeeEnabledMintpay);
+      if (updates.paymentFeeEnabledPayzy !== undefined) payload['payment_fee_enabled_payzy'] = String(updates.paymentFeeEnabledPayzy);
+      if (updates.paymentFeeEnabledKoko !== undefined) payload['payment_fee_enabled_koko'] = String(updates.paymentFeeEnabledKoko);
 
       await api.updateSettings(payload);
       applyBusinessData(updates);

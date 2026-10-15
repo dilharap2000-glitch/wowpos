@@ -20,8 +20,9 @@ import {
   Eye,
 } from 'lucide-react';
 import { api } from '../lib/api.ts';
-import { Product, Sale, Member } from '../types.ts';
+import { Product, Sale, Member, PaymentMethod } from '../types.ts';
 import { useBusiness } from '../context/BusinessContext.tsx';
+import { PAYMENT_METHODS, calculatePaymentFee, formatPaymentMethod } from '../lib/payment-fee.ts';
 
 interface CartItem {
   product: Product;
@@ -62,7 +63,7 @@ export const PosView: React.FC<PosViewProps> = ({ initialTab = 'pos' }) => {
   const [customerName, setCustomerName] = useState('Walk-in Customer');
   const [customerPhone, setCustomerPhone] = useState('');
   const [discount, setDiscount] = useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'bank_transfer'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [completingSale, setCompletingSale] = useState(false);
 
   // Modals
@@ -202,9 +203,34 @@ export const PosView: React.FC<PosViewProps> = ({ initialTab = 'pos' }) => {
     return cart.reduce((sum, item) => sum + item.product.sellingPrice * item.quantity, 0);
   }, [cart]);
 
-  const cartFinalTotal = useMemo(() => {
+  const cartBaseAmount = useMemo(() => {
     return Math.max(0, cartSubtotal - (Number(discount) || 0));
   }, [cartSubtotal, discount]);
+
+  // Payment fee calculation based on tenant settings
+  const feeCalc = useMemo(() => {
+    const rate =
+      paymentMethod === 'mintpay'
+        ? (business.paymentFeeMintpay ?? 12)
+        : paymentMethod === 'payzy'
+        ? (business.paymentFeePayzy ?? 12)
+        : paymentMethod === 'koko'
+        ? (business.paymentFeeKoko ?? 12)
+        : 0;
+
+    const enabled =
+      paymentMethod === 'mintpay'
+        ? (business.paymentFeeEnabledMintpay ?? true)
+        : paymentMethod === 'payzy'
+        ? (business.paymentFeeEnabledPayzy ?? true)
+        : paymentMethod === 'koko'
+        ? (business.paymentFeeEnabledKoko ?? true)
+        : true;
+
+    return calculatePaymentFee(cartBaseAmount, paymentMethod, rate, enabled);
+  }, [cartBaseAmount, paymentMethod, business]);
+
+  const cartFinalTotal = feeCalc.totalAmount;
 
   // Complete Sale
   const handleCheckout = async () => {
@@ -225,6 +251,11 @@ export const PosView: React.FC<PosViewProps> = ({ initialTab = 'pos' }) => {
         customerPhone: customerPhone.trim() || null,
         items: itemsPayload,
         discount: Number(discount) || 0,
+        baseAmount: cartBaseAmount,
+        paymentFee: feeCalc.paymentFee,
+        paymentFeeRate: feeCalc.paymentFeeRate,
+        totalAmount: feeCalc.totalAmount,
+        finalAmount: feeCalc.totalAmount,
         paymentMethod,
       });
 
@@ -641,52 +672,108 @@ export const PosView: React.FC<PosViewProps> = ({ initialTab = 'pos' }) => {
             <div className="p-4 bg-zinc-950 border-t border-zinc-800 space-y-3">
               {/* Payment Method Selector */}
               <div>
-                <label className="text-[10px] text-zinc-400 font-semibold uppercase mb-1 block">
-                  Payment Method
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] text-zinc-400 font-semibold uppercase block">
+                    Payment Method
+                  </label>
+                  {feeCalc.paymentFee > 0 && (
+                    <span className="text-[10px] font-mono font-bold text-cyan-400">
+                      +{feeCalc.paymentFeeRate}% Fee ({currency} {feeCalc.paymentFee.toLocaleString()})
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['cash', 'card', 'bank_transfer'] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setPaymentMethod(m)}
-                      className={`py-1.5 px-2 text-xs font-bold rounded border transition-all capitalize ${
-                        paymentMethod === m
-                          ? 'bg-purple-600/30 border-purple-500 text-purple-300'
-                          : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      {m.replace('_', ' ')}
-                    </button>
-                  ))}
+                  {PAYMENT_METHODS.map((pm) => {
+                    const isSelected = paymentMethod === pm.id;
+                    const isBnpl = pm.isBnplOrDigital;
+                    const rate =
+                      pm.id === 'mintpay'
+                        ? (business.paymentFeeMintpay ?? 12)
+                        : pm.id === 'payzy'
+                        ? (business.paymentFeePayzy ?? 12)
+                        : pm.id === 'koko'
+                        ? (business.paymentFeeKoko ?? 12)
+                        : 0;
+                    return (
+                      <button
+                        key={pm.id}
+                        type="button"
+                        onClick={() => setPaymentMethod(pm.id)}
+                        className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all flex flex-col items-center justify-center gap-0.5 text-center ${
+                          isSelected
+                            ? 'bg-amber-400/20 border-amber-400 text-amber-300 shadow-sm'
+                            : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                        }`}
+                      >
+                        <span className="capitalize">{pm.label}</span>
+                        {isBnpl && (
+                          <span className={`text-[9px] font-mono ${isSelected ? 'text-amber-300' : 'text-cyan-400'}`}>
+                            +{rate}% fee
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Discount and Subtotal breakdown */}
-              <div className="space-y-1 text-xs pt-1">
+              {/* Discount, Base Amount, and Payment Fee breakdown */}
+              <div className="space-y-1.5 text-xs pt-1">
                 <div className="flex justify-between text-zinc-400">
                   <span>Subtotal</span>
                   <span>
                     {currency} {cartSubtotal.toLocaleString()}
                   </span>
                 </div>
+                {discount > 0 && (
+                  <div className="flex justify-between text-red-400">
+                    <span>Discount</span>
+                    <span>
+                      - {currency} {discount.toLocaleString()}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center text-zinc-400">
-                  <span>Discount ({currency})</span>
+                  <span>Discount Input ({currency})</span>
                   <input
                     type="number"
                     min="0"
                     value={discount || ''}
                     onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))}
                     placeholder="0"
-                    className="w-24 bg-zinc-900 border border-zinc-800 text-right px-2 py-0.5 rounded text-white text-xs focus:border-purple-500 focus:outline-none"
+                    className="w-24 bg-zinc-900 border border-zinc-800 text-right px-2 py-0.5 rounded text-white text-xs focus:border-amber-400 focus:outline-none font-mono"
                   />
                 </div>
-                <div className="flex justify-between text-base font-bold text-white pt-2 border-t border-zinc-800">
-                  <span>Total Amount</span>
-                  <span className="text-amber-400">
-                    {currency} {cartFinalTotal.toLocaleString()}
-                  </span>
-                </div>
+
+                {feeCalc.paymentFee > 0 ? (
+                  <>
+                    <div className="flex justify-between text-zinc-300 pt-1 border-t border-zinc-800/80 font-mono">
+                      <span>Base Amount</span>
+                      <span className="font-bold">
+                        {currency} {cartBaseAmount.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-cyan-400 font-mono">
+                      <span>Payment Fee ({feeCalc.paymentFeeRate}%)</span>
+                      <span className="font-bold">
+                        + {currency} {feeCalc.paymentFee.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-base font-black text-white pt-2 border-t border-zinc-800">
+                      <span>Total Payable</span>
+                      <span className="text-amber-400 font-mono">
+                        {currency} {cartFinalTotal.toLocaleString()}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between text-base font-black text-white pt-2 border-t border-zinc-800">
+                    <span>Total Amount</span>
+                    <span className="text-amber-400 font-mono">
+                      {currency} {cartFinalTotal.toLocaleString()}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Primary Action Button: Yellow/Gold per design preference */}
@@ -864,11 +951,36 @@ export const PosView: React.FC<PosViewProps> = ({ initialTab = 'pos' }) => {
                       <td className="p-3.5 text-xs text-zinc-400">
                         {s.items?.length || 1} product(s)
                       </td>
-                      <td className="p-3.5 text-xs capitalize font-medium text-zinc-300">
-                        {s.paymentMethod.replace('_', ' ')}
+                      <td className="p-3.5 text-xs">
+                        {(() => {
+                          const meta = PAYMENT_METHODS.find((m) => m.id === s.paymentMethod);
+                          const label = meta?.label || s.paymentMethod.replace('_', ' ');
+                          const badgeBg = meta?.badgeBg || 'bg-zinc-800';
+                          const badgeBorder = meta?.badgeBorder || 'border-zinc-700';
+                          const badgeText = meta?.badgeText || 'text-zinc-300';
+                          return (
+                            <div className="flex flex-col gap-0.5 items-start">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeBg} ${badgeBorder} ${badgeText}`}>
+                                {label}
+                              </span>
+                              {s.paymentFee && s.paymentFee > 0 ? (
+                                <span className="text-[10px] text-cyan-400 font-mono">
+                                  +{currency} {s.paymentFee.toLocaleString()} fee
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </td>
-                      <td className="p-3.5 font-bold text-amber-400">
-                        {currency} {s.finalAmount.toLocaleString()}
+                      <td className="p-3.5">
+                        <div className="font-bold text-amber-400 font-mono">
+                          {currency} {s.finalAmount.toLocaleString()}
+                        </div>
+                        {s.paymentFee && s.paymentFee > 0 ? (
+                          <div className="text-[10px] text-zinc-500 font-mono">
+                            Base: {currency} {(s.baseAmount ?? (s.subtotal - s.discount)).toLocaleString()}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="p-3.5">
                         <span
@@ -1339,7 +1451,7 @@ export const PosView: React.FC<PosViewProps> = ({ initialTab = 'pos' }) => {
                 <div className="flex justify-between">
                   <span>Payment:</span>
                   <span className="uppercase font-bold">
-                    {activeReceiptSale.paymentMethod.replace('_', ' ')}
+                    {formatPaymentMethod(activeReceiptSale.paymentMethod)}
                   </span>
                 </div>
               </div>
@@ -1377,6 +1489,28 @@ export const PosView: React.FC<PosViewProps> = ({ initialTab = 'pos' }) => {
                     </span>
                   </div>
                 )}
+                {activeReceiptSale.paymentFee && activeReceiptSale.paymentFee > 0 ? (
+                  <>
+                    <div className="flex justify-between text-gray-700">
+                      <span>Base Amount:</span>
+                      <span>
+                        {currency}{' '}
+                        {(
+                          activeReceiptSale.baseAmount ??
+                          activeReceiptSale.subtotal - (activeReceiptSale.discount || 0)
+                        ).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-cyan-700 font-bold">
+                      <span>
+                        Payment Fee ({activeReceiptSale.paymentFeeRate || 12}%):
+                      </span>
+                      <span>
+                        + {currency} {activeReceiptSale.paymentFee.toLocaleString()}
+                      </span>
+                    </div>
+                  </>
+                ) : null}
                 <div className="flex justify-between text-sm font-black border-t border-black pt-1">
                   <span>TOTAL PAID:</span>
                   <span>

@@ -377,6 +377,8 @@ app.post('/api/members', requireAuth, requireGymTenant, async (req: AuthRequest,
       startDate: paymentDate,
       paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : undefined,
       membershipAmount: membershipAmount !== undefined ? Number(membershipAmount) : undefined,
+      baseAmount: req.body.baseAmount !== undefined ? Number(req.body.baseAmount) : undefined,
+      totalAmount: req.body.totalAmount !== undefined ? Number(req.body.totalAmount) : undefined,
       addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
       admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
       memberType: memberType === 'couple' ? 'couple' : 'individual',
@@ -384,7 +386,7 @@ app.post('/api/members', requireAuth, requireGymTenant, async (req: AuthRequest,
       partnerPhone: memberType === 'couple' ? partnerPhone : undefined,
       partnerMemberNumber: memberType === 'couple' ? partnerMemberNumber : undefined,
       registerPartnerMember: memberType === 'couple' ? Boolean(registerPartnerMember) : false,
-      paymentMethod: paymentMethod || 'cash',
+      paymentMethod: (paymentMethod || 'cash') as any,
       emergencyContact,
       notes,
       createdBy: req.user?.name || 'Admin',
@@ -504,10 +506,12 @@ app.post('/api/members/:id/renew', requireAuth, requireGymTenant, async (req: Au
         startDate,
         paymentAmount: paymentAmount !== undefined ? Number(paymentAmount) : undefined,
         membershipAmount: membershipAmount !== undefined ? Number(membershipAmount) : undefined,
+        baseAmount: req.body.baseAmount !== undefined ? Number(req.body.baseAmount) : undefined,
+        totalAmount: req.body.totalAmount !== undefined ? Number(req.body.totalAmount) : undefined,
         addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
         admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
         memberType,
-        paymentMethod: paymentMethod || 'cash',
+        paymentMethod: (paymentMethod || 'cash') as any,
         notes,
         createdBy: req.user?.name || 'Admin',
       },
@@ -674,7 +678,7 @@ app.get('/api/sales', requireAuth, requireGymTenant, async (req: AuthRequest, re
 app.post('/api/sales', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
   try {
     const businessId = req.businessId || resolveBusinessId(req.gymId);
-    const { memberId, customerName, customerPhone, items, discount, paymentMethod } = req.body;
+    const { memberId, customerName, customerPhone, items, discount, paymentMethod, baseAmount, totalAmount, finalAmount } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Items array is required for a sale.' });
@@ -686,7 +690,10 @@ app.post('/api/sales', requireAuth, requireGymTenant, async (req: AuthRequest, r
       customerPhone,
       items,
       discount: Number(discount || 0),
-      paymentMethod: paymentMethod || 'cash',
+      baseAmount: baseAmount !== undefined ? Number(baseAmount) : undefined,
+      totalAmount: totalAmount !== undefined ? Number(totalAmount) : undefined,
+      finalAmount: finalAmount !== undefined ? Number(finalAmount) : undefined,
+      paymentMethod: (paymentMethod || 'cash') as any,
       createdBy: req.user?.name || 'Staff',
     });
 

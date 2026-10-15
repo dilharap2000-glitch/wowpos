@@ -1,5 +1,6 @@
 import { getMongoDb, setupMongoIndexes, getMongoUri } from './mongodb.ts';
-import type { Member, DashboardStats, Product, Sale, SaleItem, Gym, BusinessSettings, UserAccount, SuperAdminDashboardData } from '../types.ts';
+import type { Member, DashboardStats, Product, Sale, SaleItem, Gym, BusinessSettings, UserAccount, SuperAdminDashboardData, PaymentMethod } from '../types.ts';
+import { calculatePaymentFee } from '../lib/payment-fee.ts';
 import { sendSms } from '../lib/sms/smslen.ts';
 import { hashPassword, verifyPassword } from '../lib/security.ts';
 import bcrypt from 'bcryptjs';
@@ -682,6 +683,63 @@ const initialStore: MemoryStore = {
       notes: '1-Month gym access',
       createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000),
     },
+    {
+      id: 10,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: 4,
+      memberNumber: 'TF-1004',
+      baseAmount: 10000,
+      paymentFee: 1200,
+      paymentFeeRate: 12,
+      totalAmount: 11200,
+      amount: 11200,
+      paymentDate: formatDateStr(new Date(Date.now() - 2 * 24 * 3600 * 1000)),
+      package: 'monthly',
+      paymentMethod: 'mintpay',
+      newExpiryDate: formatDateStr(new Date(Date.now() + 28 * 24 * 3600 * 1000)),
+      createdBy: 'admin',
+      notes: 'Mintpay 3-installment plan (12% payment fee applied)',
+      createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000),
+    },
+    {
+      id: 11,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: 1,
+      memberNumber: 'TF-1001',
+      baseAmount: 4500,
+      paymentFee: 540,
+      paymentFeeRate: 12,
+      totalAmount: 5040,
+      amount: 5040,
+      paymentDate: formatDateStr(new Date(Date.now() - 1 * 24 * 3600 * 1000)),
+      package: 'monthly',
+      paymentMethod: 'payzy',
+      newExpiryDate: formatDateStr(new Date(Date.now() + 29 * 24 * 3600 * 1000)),
+      createdBy: 'admin',
+      notes: 'PayZy digital payment (12% payment fee applied)',
+      createdAt: new Date(Date.now() - 1 * 24 * 3600 * 1000),
+    },
+    {
+      id: 12,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: 2,
+      memberNumber: 'TF-1002',
+      baseAmount: 22000,
+      paymentFee: 2640,
+      paymentFeeRate: 12,
+      totalAmount: 24640,
+      amount: 24640,
+      paymentDate: formatDateStr(new Date()),
+      package: '6_months',
+      paymentMethod: 'koko',
+      newExpiryDate: formatDateStr(new Date(Date.now() + 180 * 24 * 3600 * 1000)),
+      createdBy: 'admin',
+      notes: 'Koko BNPL checkout (12% payment fee applied)',
+      createdAt: new Date(),
+    },
   ],
   attendance: [
     {
@@ -963,7 +1021,76 @@ const initialStore: MemoryStore = {
     },
   ],
   stockMovements: [],
-  sales: [],
+  sales: [
+    {
+      id: 1,
+      businessId: 'biz_1',
+      gymId: 1,
+      receiptNumber: 'REC-901001',
+      saleNumber: 'SAL-1',
+      memberId: 1,
+      customerName: 'Kasun Perera',
+      customerPhone: '+94 77 123 4567',
+      subtotal: 8500,
+      discount: 0,
+      baseAmount: 8500,
+      paymentFee: 0,
+      paymentFeeRate: 0,
+      totalAmount: 8500,
+      finalAmount: 8500,
+      paymentMethod: 'cash',
+      paymentStatus: 'paid',
+      cashierName: 'admin',
+      notes: 'Creatine Monohydrate purchase',
+      createdAt: new Date(Date.now() - 24 * 3600 * 1000),
+      items: [
+        {
+          id: 1,
+          saleId: 1,
+          productId: 2,
+          productName: 'Creatine Monohydrate 300g',
+          quantity: 1,
+          unitCostPrice: 6500,
+          unitSellingPrice: 8500,
+          subtotal: 8500,
+        },
+      ],
+    },
+    {
+      id: 2,
+      businessId: 'biz_1',
+      gymId: 1,
+      receiptNumber: 'REC-901002',
+      saleNumber: 'SAL-2',
+      memberId: 2,
+      customerName: 'Niroshan Silva',
+      customerPhone: '+94 71 234 5678',
+      subtotal: 19500,
+      discount: 0,
+      baseAmount: 19500,
+      paymentFee: 2340,
+      paymentFeeRate: 12,
+      totalAmount: 21840,
+      finalAmount: 21840,
+      paymentMethod: 'mintpay',
+      paymentStatus: 'paid',
+      cashierName: 'admin',
+      notes: 'Gold Standard Whey via Mintpay (12% payment fee)',
+      createdAt: new Date(Date.now() - 5 * 3600 * 1000),
+      items: [
+        {
+          id: 2,
+          saleId: 2,
+          productId: 1,
+          productName: 'Gold Standard Whey Protein 2lb',
+          quantity: 1,
+          unitCostPrice: 16000,
+          unitSellingPrice: 19500,
+          subtotal: 19500,
+        },
+      ],
+    },
+  ],
   saleItems: [],
   settings: [
     // ZENERGY FITNESS (biz_1)
@@ -980,6 +1107,12 @@ const initialStore: MemoryStore = {
     { businessId: 'biz_1', gymId: 1, key: 'sms_provider_name', value: 'SMSlenz Sri Lanka' },
     { businessId: 'biz_1', gymId: 1, key: 'sms_api_method', value: 'POST' },
     { businessId: 'biz_1', gymId: 1, key: 'sms_active', value: 'true' },
+    { businessId: 'biz_1', gymId: 1, key: 'payment_fee_mintpay', value: '12' },
+    { businessId: 'biz_1', gymId: 1, key: 'payment_fee_payzy', value: '12' },
+    { businessId: 'biz_1', gymId: 1, key: 'payment_fee_koko', value: '12' },
+    { businessId: 'biz_1', gymId: 1, key: 'payment_fee_enabled_mintpay', value: 'true' },
+    { businessId: 'biz_1', gymId: 1, key: 'payment_fee_enabled_payzy', value: 'true' },
+    { businessId: 'biz_1', gymId: 1, key: 'payment_fee_enabled_koko', value: 'true' },
     // POWER FITNESS (biz_2)
     { businessId: 'biz_2', gymId: 2, key: 'gym_name', value: 'POWER FITNESS' },
     { businessId: 'biz_2', gymId: 2, key: 'currency', value: 'Rs.' },
@@ -989,6 +1122,12 @@ const initialStore: MemoryStore = {
     { businessId: 'biz_2', gymId: 2, key: 'description', value: 'Heavy Duty Strength, Muscle & Performance Center' },
     { businessId: 'biz_2', gymId: 2, key: 'admission_fee', value: '1500' },
     { businessId: 'biz_2', gymId: 2, key: 'receipt_footer', value: 'Power Fitness Kandy. Push harder every single day.' },
+    { businessId: 'biz_2', gymId: 2, key: 'payment_fee_mintpay', value: '12' },
+    { businessId: 'biz_2', gymId: 2, key: 'payment_fee_payzy', value: '12' },
+    { businessId: 'biz_2', gymId: 2, key: 'payment_fee_koko', value: '12' },
+    { businessId: 'biz_2', gymId: 2, key: 'payment_fee_enabled_mintpay', value: 'true' },
+    { businessId: 'biz_2', gymId: 2, key: 'payment_fee_enabled_payzy', value: 'true' },
+    { businessId: 'biz_2', gymId: 2, key: 'payment_fee_enabled_koko', value: 'true' },
     // ELITE FITNESS (biz_3)
     { businessId: 'biz_3', gymId: 3, key: 'gym_name', value: 'ELITE FITNESS' },
     { businessId: 'biz_3', gymId: 3, key: 'currency', value: '$' },
@@ -998,6 +1137,12 @@ const initialStore: MemoryStore = {
     { businessId: 'biz_3', gymId: 3, key: 'description', value: 'Elite Athletic Conditioning, Recovery & Olympic Weightlifting' },
     { businessId: 'biz_3', gymId: 3, key: 'admission_fee', value: '25' },
     { businessId: 'biz_3', gymId: 3, key: 'receipt_footer', value: 'Excellence in athletic development. Powered by WOW POS.' },
+    { businessId: 'biz_3', gymId: 3, key: 'payment_fee_mintpay', value: '12' },
+    { businessId: 'biz_3', gymId: 3, key: 'payment_fee_payzy', value: '12' },
+    { businessId: 'biz_3', gymId: 3, key: 'payment_fee_koko', value: '12' },
+    { businessId: 'biz_3', gymId: 3, key: 'payment_fee_enabled_mintpay', value: 'true' },
+    { businessId: 'biz_3', gymId: 3, key: 'payment_fee_enabled_payzy', value: 'true' },
+    { businessId: 'biz_3', gymId: 3, key: 'payment_fee_enabled_koko', value: 'true' },
   ],
   smsLogs: [],
 };
@@ -1209,6 +1354,29 @@ export class GymService {
     ) || null;
   }
 
+  static async getPaymentFeeConfig(gymIdOrBusinessId: number | string, method?: string | null): Promise<{ rate: number; enabled: boolean }> {
+    const businessId = resolveBusinessId(gymIdOrBusinessId);
+    const settings = await this.getSettings(businessId);
+    const cleanMethod = String(method || '').toLowerCase().trim();
+
+    if (cleanMethod === 'mintpay') {
+      const enabled = settings['payment_fee_enabled_mintpay'] !== undefined ? settings['payment_fee_enabled_mintpay'] === 'true' : true;
+      const rate = settings['payment_fee_mintpay'] !== undefined ? Number(settings['payment_fee_mintpay']) : 12;
+      return { rate: enabled ? rate : 0, enabled };
+    }
+    if (cleanMethod === 'payzy') {
+      const enabled = settings['payment_fee_enabled_payzy'] !== undefined ? settings['payment_fee_enabled_payzy'] === 'true' : true;
+      const rate = settings['payment_fee_payzy'] !== undefined ? Number(settings['payment_fee_payzy']) : 12;
+      return { rate: enabled ? rate : 0, enabled };
+    }
+    if (cleanMethod === 'koko') {
+      const enabled = settings['payment_fee_enabled_koko'] !== undefined ? settings['payment_fee_enabled_koko'] === 'true' : true;
+      const rate = settings['payment_fee_koko'] !== undefined ? Number(settings['payment_fee_koko']) : 12;
+      return { rate: enabled ? rate : 0, enabled };
+    }
+    return { rate: 0, enabled: true };
+  }
+
   static async createMember(data: {
     gymId?: number;
     businessId?: string;
@@ -1223,6 +1391,8 @@ export class GymService {
     startDate: string;
     paymentAmount?: number;
     membershipAmount?: number;
+    baseAmount?: number;
+    totalAmount?: number;
     addAdmissionFee?: boolean;
     admissionFeeApplied?: boolean;
     memberType?: 'individual' | 'couple';
@@ -1230,7 +1400,7 @@ export class GymService {
     partnerPhone?: string;
     partnerMemberNumber?: string;
     registerPartnerMember?: boolean;
-    paymentMethod: 'cash' | 'card' | 'bank_transfer';
+    paymentMethod: PaymentMethod;
     createdBy?: string;
   }) {
     await ensureMongoSeeded();
@@ -1308,7 +1478,24 @@ export class GymService {
     // Server-side admission fee calculation (strictly optional, never forced)
     const isAdmissionApplied = Boolean(data.addAdmissionFee || data.admissionFeeApplied);
     const serverAdmissionFee = isAdmissionApplied ? tenantAdmissionFee : 0;
-    const serverTotalAmount = serverMembershipAmount + serverAdmissionFee;
+    const serverBaseAmount = serverMembershipAmount + serverAdmissionFee;
+
+    // Backend Security & Calculation: Recalculate payment fee and final total independently
+    const feeConfig = await this.getPaymentFeeConfig(businessId, data.paymentMethod);
+    const feeCalc = calculatePaymentFee(serverBaseAmount, data.paymentMethod, feeConfig.rate, feeConfig.enabled);
+    const serverPaymentFee = feeCalc.paymentFee;
+    const serverPaymentFeeRate = feeCalc.paymentFeeRate;
+    const serverFinalTotal = feeCalc.totalAmount;
+
+    // Reject manipulated totals (tamper prevention)
+    if (data.paymentAmount !== undefined || data.totalAmount !== undefined) {
+      const clientAmount = Number(data.totalAmount ?? data.paymentAmount);
+      if (Math.abs(clientAmount - serverFinalTotal) > 2) {
+        throw new Error(
+          `Security validation failed: Payment total mismatch. Server calculated total is Rs. ${serverFinalTotal.toLocaleString()} (Base: Rs. ${serverBaseAmount.toLocaleString()}, ${serverPaymentFeeRate}% Fee: Rs. ${serverPaymentFee.toLocaleString()}), but received Rs. ${clientAmount.toLocaleString()}.`
+        );
+      }
+    }
 
     const memberId = Date.now();
     const newMemberDoc: any = {
@@ -1343,7 +1530,10 @@ export class GymService {
       status: 'active',
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      baseAmount: serverBaseAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? 'couple' : 'individual',
       partnerName: isCouple && data.partnerName ? data.partnerName.trim() : null,
@@ -1359,10 +1549,13 @@ export class GymService {
       gymId,
       memberId,
       memberNumber,
-      amount: serverTotalAmount,
+      amount: serverFinalTotal,
+      baseAmount: serverBaseAmount,
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? 'couple' : 'individual',
       partnerName: isCouple && data.partnerName ? data.partnerName.trim() : null,
@@ -1576,7 +1769,7 @@ export class GymService {
       addAdmissionFee?: boolean;
       admissionFeeApplied?: boolean;
       memberType?: 'individual' | 'couple';
-      paymentMethod: 'cash' | 'card' | 'bank_transfer';
+      paymentMethod: PaymentMethod;
       createdBy?: string;
       notes?: string;
     };
@@ -1643,7 +1836,24 @@ export class GymService {
         else serverMembershipAmount = gymDetails?.monthlyPrice || 4500;
       }
     }
-    const serverTotalAmount = serverMembershipAmount + serverAdmissionFee;
+    const serverBaseAmount = serverMembershipAmount + serverAdmissionFee;
+
+    // Backend Security & Calculation: Recalculate payment fee and final total independently
+    const feeConfig = await this.getPaymentFeeConfig(businessId, data.paymentMethod);
+    const feeCalc = calculatePaymentFee(serverBaseAmount, data.paymentMethod, feeConfig.rate, feeConfig.enabled);
+    const serverPaymentFee = feeCalc.paymentFee;
+    const serverPaymentFeeRate = feeCalc.paymentFeeRate;
+    const serverFinalTotal = feeCalc.totalAmount;
+
+    // Reject manipulated totals (tamper prevention)
+    if (data.paymentAmount !== undefined || (data as any).totalAmount !== undefined) {
+      const clientAmount = Number((data as any).totalAmount ?? data.paymentAmount);
+      if (Math.abs(clientAmount - serverFinalTotal) > 2) {
+        throw new Error(
+          `Security validation failed: Renewal payment total mismatch. Server calculated total is Rs. ${serverFinalTotal.toLocaleString()} (Base: Rs. ${serverBaseAmount.toLocaleString()}, ${serverPaymentFeeRate}% Fee: Rs. ${serverPaymentFee.toLocaleString()}), but received Rs. ${clientAmount.toLocaleString()}.`
+        );
+      }
+    }
 
     const membershipDoc: any = {
       id: Date.now(),
@@ -1656,7 +1866,10 @@ export class GymService {
       status: 'active',
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      baseAmount: serverBaseAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? 'couple' : 'individual',
       partnerName: member.partnerName || null,
@@ -1672,10 +1885,13 @@ export class GymService {
       gymId,
       memberId: data.memberId,
       memberNumber: member.memberNumber,
-      amount: serverTotalAmount,
+      amount: serverFinalTotal,
+      baseAmount: serverBaseAmount,
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? 'couple' : 'individual',
       partnerName: member.partnerName || null,
@@ -1882,10 +2098,25 @@ export class GymService {
     const db = await getMongoDb();
     const businessId = resolveBusinessId(gymIdOrBusinessId);
 
-    if (db) {
-      return db.collection('payments').find({ businessId }).sort({ id: -1 }).limit(limit).toArray();
-    }
-    return mem.payments.filter((p) => p.businessId === businessId || p.gymId === resolveGymId(gymIdOrBusinessId)).slice(0, limit);
+    const rawList = db
+      ? await db.collection('payments').find({ businessId }).sort({ id: -1 }).limit(limit).toArray()
+      : mem.payments.filter((p) => p.businessId === businessId || p.gymId === resolveGymId(gymIdOrBusinessId)).slice(0, limit);
+
+    return rawList.map((p) => {
+      const totalAmount = Number(p.totalAmount ?? p.amount ?? 0);
+      const baseAmount = Number(p.baseAmount ?? p.membershipAmount ?? totalAmount);
+      const paymentFee = Number(p.paymentFee ?? Math.max(0, totalAmount - baseAmount));
+      const paymentFeeRate = Number(p.paymentFeeRate ?? (baseAmount > 0 && paymentFee > 0 ? Math.round((paymentFee * 100) / baseAmount) : 0));
+      return {
+        ...p,
+        amount: totalAmount,
+        totalAmount,
+        baseAmount,
+        paymentFee,
+        paymentFeeRate,
+        paymentMethod: (p.paymentMethod || 'cash') as PaymentMethod,
+      };
+    });
   }
 
   // =========================================================================
@@ -2129,7 +2360,12 @@ export class GymService {
         unitSellingPrice: number;
       }[];
       discount?: number;
-      paymentMethod: 'cash' | 'card' | 'bank_transfer';
+      baseAmount?: number;
+      paymentFee?: number;
+      paymentFeeRate?: number;
+      totalAmount?: number;
+      finalAmount?: number;
+      paymentMethod: PaymentMethod;
       cashierName?: string;
       notes?: string;
     };
@@ -2186,7 +2422,26 @@ export class GymService {
     }
 
     const discount = Math.max(0, Number(data.discount) || 0);
-    const totalAmount = Math.max(0, subtotal - discount);
+    const baseAmount = Math.max(0, subtotal - discount);
+
+    // Backend Security & Calculation: Recalculate payment fee and final total
+    const paymentMethod: PaymentMethod = (data.paymentMethod || 'cash') as PaymentMethod;
+    const feeConfig = await this.getPaymentFeeConfig(businessId, paymentMethod);
+    const feeCalc = calculatePaymentFee(baseAmount, paymentMethod, feeConfig.rate, feeConfig.enabled);
+    const serverPaymentFee = feeCalc.paymentFee;
+    const serverPaymentFeeRate = feeCalc.paymentFeeRate;
+    const finalTotal = feeCalc.totalAmount;
+
+    // Reject manipulated totals (tamper prevention)
+    if ((data as any).totalAmount !== undefined || (data as any).finalAmount !== undefined) {
+      const clientAmount = Number((data as any).totalAmount ?? (data as any).finalAmount);
+      if (Math.abs(clientAmount - finalTotal) > 2) {
+        throw new Error(
+          `Security validation failed: Sale payment total mismatch. Server calculated total is Rs. ${finalTotal.toLocaleString()} (Base: Rs. ${baseAmount.toLocaleString()}, ${serverPaymentFeeRate}% Fee: Rs. ${serverPaymentFee.toLocaleString()}), but received Rs. ${clientAmount.toLocaleString()}.`
+        );
+      }
+    }
+
     const receiptNumber = `REC-${Date.now().toString().slice(-6)}`;
 
     const saleDoc: any = {
@@ -2199,8 +2454,12 @@ export class GymService {
       customerPhone: data.customerPhone || null,
       subtotal,
       discount,
-      totalAmount,
-      paymentMethod: data.paymentMethod || 'cash',
+      baseAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: finalTotal,
+      finalAmount: finalTotal,
+      paymentMethod,
       paymentStatus: 'paid',
       cashierName: data.cashierName || 'admin',
       notes: data.notes || null,
@@ -2278,7 +2537,12 @@ export class GymService {
     }
 
     return list.map((s) => {
-      const finalAmount = Number(s.finalAmount ?? s.totalAmount ?? 0);
+      const subtotal = Number(s.subtotal || 0);
+      const discount = Number(s.discount || 0);
+      const baseAmount = Number(s.baseAmount ?? Math.max(0, subtotal - discount));
+      const paymentFee = Number(s.paymentFee || 0);
+      const paymentFeeRate = Number(s.paymentFeeRate || (baseAmount > 0 && paymentFee > 0 ? Math.round((paymentFee * 100) / baseAmount) : 0));
+      const finalAmount = Number(s.finalAmount ?? s.totalAmount ?? (baseAmount + paymentFee));
       const isRefunded = s.status === 'refunded' || s.paymentStatus === 'refunded';
       const saleNumber = s.saleNumber || s.receiptNumber || `SAL-${s.id}`;
       return {
@@ -2289,11 +2553,14 @@ export class GymService {
         memberId: s.memberId || null,
         customerName: s.customerName || 'Walk-in Customer',
         customerPhone: s.customerPhone || null,
-        subtotal: Number(s.subtotal || finalAmount),
-        discount: Number(s.discount || 0),
+        subtotal: subtotal || finalAmount,
+        discount,
+        baseAmount,
+        paymentFee,
+        paymentFeeRate,
         finalAmount,
         totalAmount: finalAmount,
-        paymentMethod: (s.paymentMethod || 'cash') as 'cash' | 'card' | 'bank_transfer',
+        paymentMethod: (s.paymentMethod || 'cash') as PaymentMethod,
         status: (isRefunded ? 'refunded' : (s.status || 'completed')) as 'completed' | 'refunded' | 'cancelled',
         paymentStatus: isRefunded ? 'refunded' : 'paid',
         refundReason: s.refundReason || (s.notes && s.notes.includes('[REFUNDED:') ? s.notes : null),

@@ -14,6 +14,7 @@ import { api } from '../lib/api.ts';
 import { Payment } from '../types.ts';
 import { getColomboToday } from '../lib/date-utils.ts';
 import { useBusiness } from '../context/BusinessContext.tsx';
+import { PAYMENT_METHODS, formatPaymentMethod } from '../lib/payment-fee.ts';
 
 export const PaymentsView: React.FC = () => {
   const { business } = useBusiness();
@@ -60,14 +61,17 @@ export const PaymentsView: React.FC = () => {
 
   const handleExportCsv = () => {
     if (!payments.length) return;
-    const headers = ['ID', 'MemberNumber', 'Amount', 'PaymentDate', 'Package', 'PaymentMethod', 'PreviousExpiry', 'NewExpiry', 'Cashier', 'Notes'];
+    const headers = ['ID', 'MemberNumber', 'BaseAmount', 'PaymentFee', 'PaymentFeeRate', 'TotalAmount', 'PaymentDate', 'Package', 'PaymentMethod', 'PreviousExpiry', 'NewExpiry', 'Cashier', 'Notes'];
     const rows = payments.map((p) => [
       p.id,
       p.memberNumber,
-      p.amount,
+      p.baseAmount ?? p.amount,
+      p.paymentFee ?? 0,
+      p.paymentFeeRate ?? 0,
+      p.totalAmount ?? p.amount,
       p.paymentDate,
       p.package,
-      p.paymentMethod,
+      formatPaymentMethod(p.paymentMethod),
       p.previousExpiryDate || '',
       p.newExpiryDate,
       p.createdBy || '',
@@ -181,8 +185,12 @@ export const PaymentsView: React.FC = () => {
             className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-bold focus:border-[#FACC15] focus:outline-hidden"
           >
             <option value="all">All Methods</option>
-            <option value="cash">Cash Only</option>
-            <option value="bank_transfer">Bank Transfer Only</option>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="mintpay">Mintpay (BNPL)</option>
+            <option value="payzy">PayZy</option>
+            <option value="koko">Koko (BNPL)</option>
           </select>
 
           {/* Package Filter */}
@@ -277,19 +285,38 @@ export const PaymentsView: React.FC = () => {
                     <td className="py-3.5 px-3 capitalize font-bold text-white">
                       {p.package.replace('_', ' ')}
                     </td>
-                    <td className="py-3.5 px-3 font-black text-green-400 font-mono text-sm">
-                      {business.currency} {p.amount.toLocaleString()}
+                    <td className="py-3.5 px-3">
+                      <div className="font-black text-green-400 font-mono text-sm">
+                        {business.currency} {p.amount.toLocaleString()}
+                      </div>
+                      {p.paymentFee && p.paymentFee > 0 ? (
+                        <div className="text-[10px] text-gray-500 font-mono">
+                          Base: {business.currency} {(p.baseAmount ?? (p.amount - p.paymentFee)).toLocaleString()}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="py-3.5 px-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                          p.paymentMethod === 'cash'
-                            ? 'bg-orange-500/15 border border-orange-500/30 text-orange-400'
-                            : 'bg-green-500/15 border border-green-500/30 text-green-400'
-                        }`}
-                      >
-                        {p.paymentMethod.replace('_', ' ')}
-                      </span>
+                      {(() => {
+                        const meta = PAYMENT_METHODS.find((m) => m.id === p.paymentMethod);
+                        const label = meta?.label || p.paymentMethod.replace('_', ' ');
+                        const badgeBg = meta?.badgeBg || 'bg-white/5';
+                        const badgeBorder = meta?.badgeBorder || 'border-white/10';
+                        const badgeText = meta?.badgeText || 'text-gray-300';
+                        return (
+                          <div className="flex flex-col gap-0.5 items-start">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${badgeBg} ${badgeBorder} ${badgeText}`}
+                            >
+                              {label}
+                            </span>
+                            {p.paymentFee && p.paymentFee > 0 ? (
+                              <span className="text-[10px] text-cyan-400 font-mono font-bold">
+                                +{business.currency} {p.paymentFee.toLocaleString()} ({p.paymentFeeRate || 12}%)
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="py-3.5 px-3 font-mono text-gray-500">
                       {p.previousExpiryDate || 'N/A'}
