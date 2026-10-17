@@ -159,6 +159,13 @@ export async function setupMongoIndexes(db: Db) {
     // Settings
     await db.collection('settings').createIndex({ businessId: 1, key: 1 });
 
+    // Membership Reminders
+    await db.collection('membershipReminders').createIndex({ reminderKey: 1 }, { unique: true });
+    await db.collection('membershipReminders').createIndex({ businessId: 1, memberId: 1 });
+    await db.collection('membershipReminders').createIndex({ businessId: 1, status: 1 });
+    await db.collection('membershipReminders').createIndex({ businessId: 1, membershipId: 1 });
+    await db.collection('membershipReminders').createIndex({ scheduledDate: 1, status: 1 });
+
     console.log('MongoDB indexes ensured successfully.');
   } catch (err) {
     console.warn('Index creation warning:', err);

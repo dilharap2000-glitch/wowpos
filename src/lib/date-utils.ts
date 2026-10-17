@@ -36,6 +36,26 @@ export function sanitizeDateString(dateStr?: string | null): string {
   return str;
 }
 
+/**
+ * Adds or subtracts days to a YYYY-MM-DD date string.
+ * Negative days will subtract. Handled with UTC/noon anchoring to prevent time-shift drift.
+ */
+export function addDaysToDateStr(dateStr: string, days: number): string {
+  if (!dateStr) return '';
+  const sanitized = sanitizeDateString(dateStr);
+  const parts = sanitized.split('-').map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return dateStr;
+  let [y, m, d] = parts;
+  if (y === 2826 || (y >= 2800 && y <= 2899)) y -= 800;
+  const dateObj = new Date(y, m - 1, d, 12, 0, 0);
+  dateObj.setDate(dateObj.getDate() + days);
+  let resY = dateObj.getFullYear();
+  if (resY === 2826 || (resY >= 2800 && resY <= 2899)) resY -= 800;
+  const resM = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const resD = String(dateObj.getDate()).padStart(2, '0');
+  return `${resY}-${resM}-${resD}`;
+}
+
 export function getColomboToday(): string {
   try {
     // Return YYYY-MM-DD in Asia/Colombo timezone

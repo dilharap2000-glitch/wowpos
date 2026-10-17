@@ -2,6 +2,7 @@ import { getMongoDb, setupMongoIndexes, getMongoUri } from './mongodb.ts';
 import type { Member, DashboardStats, Product, Sale, SaleItem, Gym, BusinessSettings, UserAccount, SuperAdminDashboardData, PaymentMethod } from '../types.ts';
 import { calculatePaymentFee } from '../lib/payment-fee.ts';
 import { sendSms } from '../lib/sms/smslen.ts';
+import { ReminderService } from '../lib/sms/reminder-service.ts';
 import { hashPassword, verifyPassword } from '../lib/security.ts';
 import bcrypt from 'bcryptjs';
 

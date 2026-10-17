@@ -336,3 +336,37 @@ export interface UserSession {
   avatar?: string | null;
   token?: string;
 }
+
+export type ReminderType = 'reminder_2_days' | 'due_today' | 'overdue_3_days' | 'overdue_weekly';
+export type ReminderStatus = 'pending' | 'processing' | 'sent' | 'delivered' | 'failed' | 'cancelled' | 'invalidated';
+
+export interface MembershipReminder {
+  id: number;
+  reminderKey: string;
+  businessId: string;
+  gymId: number;
+  memberId: number;
+  memberName: string;
+  memberPhone: string;
+  memberType?: 'individual' | 'couple';
+  partnerMemberNumber?: string | null;
+  membershipId: number;
+  package: string;
+  membershipStartDate: string;
+  membershipExpiryDate: string;
+  reminderType: ReminderType;
+  scheduledDate: string;
+  dueDate: string;
+  status: ReminderStatus;
+  cancelledReason?: string;
+  attemptCount: number;
+  lastAttemptAt?: string | Date;
+  sentAt?: string | Date;
+  deliveredAt?: string | Date;
+  providerResponse?: any;
+  httpStatus?: number;
+  campaignId?: string | null;
+  errorMessage?: string | null;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
