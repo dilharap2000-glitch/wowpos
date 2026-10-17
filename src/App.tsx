@@ -15,6 +15,7 @@ import { BarcodeModal } from './components/BarcodeModal.tsx';
 import { LoginView } from './components/LoginView.tsx';
 import { SuperAdminView } from './components/SuperAdminView.tsx';
 import { PosView } from './components/PosView.tsx';
+import { MembershipsView } from './components/MembershipsView.tsx';
 import { api, getStoredUser, clearAuthSession, setTargetGymId, getTargetGymId } from './lib/api.ts';
 import { Member, DashboardStats, UserSession } from './types.ts';
 import { ArrowLeft, Building2 } from 'lucide-react';
@@ -178,8 +179,14 @@ export default function App() {
         return 'System Dashboard';
       case 'members':
         return 'Member Registry';
+      case 'memberships':
+        return 'Membership Plans & Pricing';
+      case 'products':
+        return 'Product Catalog & Inventory';
       case 'pos':
         return 'POS & Sales Register';
+      case 'sales':
+        return 'Sales History & Receipts';
       case 'attendance':
         return 'Reception Attendance Scanner';
       case 'payments':
@@ -276,7 +283,21 @@ export default function App() {
             />
           )}
 
-          {currentSection === 'pos' && <PosView />}
+          {currentSection === 'memberships' && (
+            <MembershipsView
+              onOpenRenewMember={(m) => setRenewingMember(m)}
+            />
+          )}
+
+          {currentSection === 'products' && (
+            <PosView initialTab="products" />
+          )}
+
+          {currentSection === 'pos' && <PosView initialTab="pos" />}
+
+          {currentSection === 'sales' && (
+            <PosView initialTab="history" />
+          )}
 
           {currentSection === 'attendance' && (
             <AttendanceScannerView

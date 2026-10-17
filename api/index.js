@@ -119,6 +119,40 @@ async function setupMongoIndexes(db) {
   }
 }
 
+// src/lib/payment-fee.ts
+function calculatePaymentFee(baseAmount, method, configuredRate, enabled = true) {
+  const safeBase = Math.max(0, Number(baseAmount) || 0);
+  let rate = 0;
+  if (method === "mintpay" || method === "payzy" || method === "koko") {
+    if (enabled !== false) {
+      rate = configuredRate !== void 0 && configuredRate !== null ? Number(configuredRate) : 12;
+    } else {
+      rate = 0;
+    }
+  } else {
+    rate = configuredRate !== void 0 && configuredRate !== null ? Number(configuredRate) : 0;
+  }
+  rate = Math.max(0, rate);
+  if (rate === 0) {
+    return {
+      baseAmount: safeBase,
+      paymentMethod: method,
+      paymentFee: 0,
+      paymentFeeRate: 0,
+      totalAmount: safeBase
+    };
+  }
+  const paymentFee = Math.round(safeBase * rate / 100);
+  const totalAmount = safeBase + paymentFee;
+  return {
+    baseAmount: safeBase,
+    paymentMethod: method,
+    paymentFee,
+    paymentFeeRate: rate,
+    totalAmount
+  };
+}
+
 // src/lib/sms/smslen.ts
 var memorySmsLogs = [];
 function normalizeSriLankanPhone(rawPhone) {
@@ -1189,6 +1223,63 @@ var initialStore = {
       createdBy: "nimal",
       notes: "1-Month gym access",
       createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1e3)
+    },
+    {
+      id: 10,
+      businessId: "biz_1",
+      gymId: 1,
+      memberId: 4,
+      memberNumber: "TF-1004",
+      baseAmount: 1e4,
+      paymentFee: 1200,
+      paymentFeeRate: 12,
+      totalAmount: 11200,
+      amount: 11200,
+      paymentDate: formatDateStr(new Date(Date.now() - 2 * 24 * 3600 * 1e3)),
+      package: "monthly",
+      paymentMethod: "mintpay",
+      newExpiryDate: formatDateStr(new Date(Date.now() + 28 * 24 * 3600 * 1e3)),
+      createdBy: "admin",
+      notes: "Mintpay 3-installment plan (12% payment fee applied)",
+      createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1e3)
+    },
+    {
+      id: 11,
+      businessId: "biz_1",
+      gymId: 1,
+      memberId: 1,
+      memberNumber: "TF-1001",
+      baseAmount: 4500,
+      paymentFee: 540,
+      paymentFeeRate: 12,
+      totalAmount: 5040,
+      amount: 5040,
+      paymentDate: formatDateStr(new Date(Date.now() - 1 * 24 * 3600 * 1e3)),
+      package: "monthly",
+      paymentMethod: "payzy",
+      newExpiryDate: formatDateStr(new Date(Date.now() + 29 * 24 * 3600 * 1e3)),
+      createdBy: "admin",
+      notes: "PayZy digital payment (12% payment fee applied)",
+      createdAt: new Date(Date.now() - 1 * 24 * 3600 * 1e3)
+    },
+    {
+      id: 12,
+      businessId: "biz_1",
+      gymId: 1,
+      memberId: 2,
+      memberNumber: "TF-1002",
+      baseAmount: 22e3,
+      paymentFee: 2640,
+      paymentFeeRate: 12,
+      totalAmount: 24640,
+      amount: 24640,
+      paymentDate: formatDateStr(/* @__PURE__ */ new Date()),
+      package: "6_months",
+      paymentMethod: "koko",
+      newExpiryDate: formatDateStr(new Date(Date.now() + 180 * 24 * 3600 * 1e3)),
+      createdBy: "admin",
+      notes: "Koko BNPL checkout (12% payment fee applied)",
+      createdAt: /* @__PURE__ */ new Date()
     }
   ],
   attendance: [
@@ -1471,7 +1562,76 @@ var initialStore = {
     }
   ],
   stockMovements: [],
-  sales: [],
+  sales: [
+    {
+      id: 1,
+      businessId: "biz_1",
+      gymId: 1,
+      receiptNumber: "REC-901001",
+      saleNumber: "SAL-1",
+      memberId: 1,
+      customerName: "Kasun Perera",
+      customerPhone: "+94 77 123 4567",
+      subtotal: 8500,
+      discount: 0,
+      baseAmount: 8500,
+      paymentFee: 0,
+      paymentFeeRate: 0,
+      totalAmount: 8500,
+      finalAmount: 8500,
+      paymentMethod: "cash",
+      paymentStatus: "paid",
+      cashierName: "admin",
+      notes: "Creatine Monohydrate purchase",
+      createdAt: new Date(Date.now() - 24 * 3600 * 1e3),
+      items: [
+        {
+          id: 1,
+          saleId: 1,
+          productId: 2,
+          productName: "Creatine Monohydrate 300g",
+          quantity: 1,
+          unitCostPrice: 6500,
+          unitSellingPrice: 8500,
+          subtotal: 8500
+        }
+      ]
+    },
+    {
+      id: 2,
+      businessId: "biz_1",
+      gymId: 1,
+      receiptNumber: "REC-901002",
+      saleNumber: "SAL-2",
+      memberId: 2,
+      customerName: "Niroshan Silva",
+      customerPhone: "+94 71 234 5678",
+      subtotal: 19500,
+      discount: 0,
+      baseAmount: 19500,
+      paymentFee: 2340,
+      paymentFeeRate: 12,
+      totalAmount: 21840,
+      finalAmount: 21840,
+      paymentMethod: "mintpay",
+      paymentStatus: "paid",
+      cashierName: "admin",
+      notes: "Gold Standard Whey via Mintpay (12% payment fee)",
+      createdAt: new Date(Date.now() - 5 * 3600 * 1e3),
+      items: [
+        {
+          id: 2,
+          saleId: 2,
+          productId: 1,
+          productName: "Gold Standard Whey Protein 2lb",
+          quantity: 1,
+          unitCostPrice: 16e3,
+          unitSellingPrice: 19500,
+          subtotal: 19500
+        }
+      ]
+    }
+  ],
   saleItems: [],
   settings: [
     // ZENERGY FITNESS (biz_1)
@@ -1488,6 +1648,12 @@ var initialStore = {
     { businessId: "biz_1", gymId: 1, key: "sms_provider_name", value: "SMSlenz Sri Lanka" },
     { businessId: "biz_1", gymId: 1, key: "sms_api_method", value: "POST" },
     { businessId: "biz_1", gymId: 1, key: "sms_active", value: "true" },
+    { businessId: "biz_1", gymId: 1, key: "payment_fee_mintpay", value: "12" },
+    { businessId: "biz_1", gymId: 1, key: "payment_fee_payzy", value: "12" },
+    { businessId: "biz_1", gymId: 1, key: "payment_fee_koko", value: "12" },
+    { businessId: "biz_1", gymId: 1, key: "payment_fee_enabled_mintpay", value: "true" },
+    { businessId: "biz_1", gymId: 1, key: "payment_fee_enabled_payzy", value: "true" },
+    { businessId: "biz_1", gymId: 1, key: "payment_fee_enabled_koko", value: "true" },
     // POWER FITNESS (biz_2)
     { businessId: "biz_2", gymId: 2, key: "gym_name", value: "POWER FITNESS" },
     { businessId: "biz_2", gymId: 2, key: "currency", value: "Rs." },
@@ -1497,6 +1663,12 @@ var initialStore = {
     { businessId: "biz_2", gymId: 2, key: "description", value: "Heavy Duty Strength, Muscle & Performance Center" },
     { businessId: "biz_2", gymId: 2, key: "admission_fee", value: "1500" },
     { businessId: "biz_2", gymId: 2, key: "receipt_footer", value: "Power Fitness Kandy. Push harder every single day." },
+    { businessId: "biz_2", gymId: 2, key: "payment_fee_mintpay", value: "12" },
+    { businessId: "biz_2", gymId: 2, key: "payment_fee_payzy", value: "12" },
+    { businessId: "biz_2", gymId: 2, key: "payment_fee_koko", value: "12" },
+    { businessId: "biz_2", gymId: 2, key: "payment_fee_enabled_mintpay", value: "true" },
+    { businessId: "biz_2", gymId: 2, key: "payment_fee_enabled_payzy", value: "true" },
+    { businessId: "biz_2", gymId: 2, key: "payment_fee_enabled_koko", value: "true" },
     // ELITE FITNESS (biz_3)
     { businessId: "biz_3", gymId: 3, key: "gym_name", value: "ELITE FITNESS" },
     { businessId: "biz_3", gymId: 3, key: "currency", value: "$" },
@@ -1505,7 +1677,13 @@ var initialStore = {
     { businessId: "biz_3", gymId: 3, key: "address", value: "500 Olympic Way, Los Angeles, CA 90015" },
     { businessId: "biz_3", gymId: 3, key: "description", value: "Elite Athletic Conditioning, Recovery & Olympic Weightlifting" },
     { businessId: "biz_3", gymId: 3, key: "admission_fee", value: "25" },
-    { businessId: "biz_3", gymId: 3, key: "receipt_footer", value: "Excellence in athletic development. Powered by WOW POS." }
+    { businessId: "biz_3", gymId: 3, key: "receipt_footer", value: "Excellence in athletic development. Powered by WOW POS." },
+    { businessId: "biz_3", gymId: 3, key: "payment_fee_mintpay", value: "12" },
+    { businessId: "biz_3", gymId: 3, key: "payment_fee_payzy", value: "12" },
+    { businessId: "biz_3", gymId: 3, key: "payment_fee_koko", value: "12" },
+    { businessId: "biz_3", gymId: 3, key: "payment_fee_enabled_mintpay", value: "true" },
+    { businessId: "biz_3", gymId: 3, key: "payment_fee_enabled_payzy", value: "true" },
+    { businessId: "biz_3", gymId: 3, key: "payment_fee_enabled_koko", value: "true" }
   ],
   smsLogs: []
 };
@@ -1529,7 +1707,22 @@ async function ensureMongoSeeded() {
       await db.collection("payments").insertMany(initialStore.payments);
       await db.collection("products").insertMany(initialStore.products);
       await db.collection("settings").insertMany(initialStore.settings);
+      if (initialStore.sales && initialStore.sales.length > 0) {
+        await db.collection("sales").insertMany(initialStore.sales);
+      }
+      if (initialStore.attendance && initialStore.attendance.length > 0) {
+        await db.collection("attendance").insertMany(initialStore.attendance);
+      }
       console.log("Initial seed complete.");
+    } else {
+      const salesCount = await db.collection("sales").countDocuments();
+      if (salesCount === 0 && initialStore.sales && initialStore.sales.length > 0) {
+        await db.collection("sales").insertMany(initialStore.sales);
+      }
+      const attendanceCount = await db.collection("attendance").countDocuments();
+      if (attendanceCount === 0 && initialStore.attendance && initialStore.attendance.length > 0) {
+        await db.collection("attendance").insertMany(initialStore.attendance);
+      }
     }
     global._mongoInitialized = true;
   } catch (err) {
@@ -1675,6 +1868,27 @@ var GymService = class {
       (m) => String(m.id) === clean || m.barcode && m.barcode.toLowerCase() === clean || m.memberNumber && m.memberNumber.toLowerCase() === clean
     ) || null;
   }
+  static async getPaymentFeeConfig(gymIdOrBusinessId, method) {
+    const businessId = resolveBusinessId(gymIdOrBusinessId);
+    const settings = await this.getSettings(businessId);
+    const cleanMethod = String(method || "").toLowerCase().trim();
+    if (cleanMethod === "mintpay") {
+      const enabled = settings["payment_fee_enabled_mintpay"] !== void 0 ? settings["payment_fee_enabled_mintpay"] === "true" : true;
+      const rate = settings["payment_fee_mintpay"] !== void 0 ? Number(settings["payment_fee_mintpay"]) : 12;
+      return { rate: enabled ? rate : 0, enabled };
+    }
+    if (cleanMethod === "payzy") {
+      const enabled = settings["payment_fee_enabled_payzy"] !== void 0 ? settings["payment_fee_enabled_payzy"] === "true" : true;
+      const rate = settings["payment_fee_payzy"] !== void 0 ? Number(settings["payment_fee_payzy"]) : 12;
+      return { rate: enabled ? rate : 0, enabled };
+    }
+    if (cleanMethod === "koko") {
+      const enabled = settings["payment_fee_enabled_koko"] !== void 0 ? settings["payment_fee_enabled_koko"] === "true" : true;
+      const rate = settings["payment_fee_koko"] !== void 0 ? Number(settings["payment_fee_koko"]) : 12;
+      return { rate: enabled ? rate : 0, enabled };
+    }
+    return { rate: 0, enabled: true };
+  }
   static async createMember(data) {
     await ensureMongoSeeded();
     const db = await getMongoDb();
@@ -1734,7 +1948,20 @@ var GymService = class {
     }
     const isAdmissionApplied = Boolean(data.addAdmissionFee || data.admissionFeeApplied);
     const serverAdmissionFee = isAdmissionApplied ? tenantAdmissionFee : 0;
-    const serverTotalAmount = serverMembershipAmount + serverAdmissionFee;
+    const serverBaseAmount = serverMembershipAmount + serverAdmissionFee;
+    const feeConfig = await this.getPaymentFeeConfig(businessId, data.paymentMethod);
+    const feeCalc = calculatePaymentFee(serverBaseAmount, data.paymentMethod, feeConfig.rate, feeConfig.enabled);
+    const serverPaymentFee = feeCalc.paymentFee;
+    const serverPaymentFeeRate = feeCalc.paymentFeeRate;
+    const serverFinalTotal = feeCalc.totalAmount;
+    if (data.paymentAmount !== void 0 || data.totalAmount !== void 0) {
+      const clientAmount = Number(data.totalAmount ?? data.paymentAmount);
+      if (Math.abs(clientAmount - serverFinalTotal) > 2) {
+        throw new Error(
+          `Security validation failed: Payment total mismatch. Server calculated total is Rs. ${serverFinalTotal.toLocaleString()} (Base: Rs. ${serverBaseAmount.toLocaleString()}, ${serverPaymentFeeRate}% Fee: Rs. ${serverPaymentFee.toLocaleString()}), but received Rs. ${clientAmount.toLocaleString()}.`
+        );
+      }
+    }
     const memberId = Date.now();
     const newMemberDoc = {
       id: memberId,
@@ -1767,7 +1994,10 @@ var GymService = class {
       status: "active",
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      baseAmount: serverBaseAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? "couple" : "individual",
       partnerName: isCouple && data.partnerName ? data.partnerName.trim() : null,
@@ -1782,10 +2012,13 @@ var GymService = class {
       gymId,
       memberId,
       memberNumber,
-      amount: serverTotalAmount,
+      amount: serverFinalTotal,
+      baseAmount: serverBaseAmount,
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? "couple" : "individual",
       partnerName: isCouple && data.partnerName ? data.partnerName.trim() : null,
@@ -1802,13 +2035,13 @@ var GymService = class {
     if (db) {
       await db.collection("members").insertOne(newMemberDoc);
       await db.collection("memberships").insertOne(newMembershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         await db.collection("payments").insertOne(newPaymentDoc);
       }
     } else {
       mem.members.unshift(newMemberDoc);
       mem.memberships.unshift(newMembershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         mem.payments.unshift(newPaymentDoc);
       }
     }
@@ -1869,7 +2102,7 @@ var GymService = class {
       const cleanPkg = data.package.replace(/_/g, " ").toUpperCase();
       const curr = gymDetails?.currency || "Rs.";
       const feeNote = isAdmissionApplied ? ` (incl. Admission Fee: ${curr} ${serverAdmissionFee.toLocaleString()})` : "";
-      const welcomeMsg = "Welcome to " + gymName + ", " + data.fullName + "! Your " + (isCouple ? "COUPLE " : "") + cleanPkg + " membership is active until " + expiryDate + ". Payment received: " + curr + " " + serverTotalAmount.toLocaleString() + feeNote + ". Member ID: " + memberNumber + ".";
+      const welcomeMsg = "Welcome to " + gymName + ", " + data.fullName + "! Your " + (isCouple ? "COUPLE " : "") + cleanPkg + " membership is active until " + expiryDate + ". Payment received: " + curr + " " + serverFinalTotal.toLocaleString() + feeNote + ". Member ID: " + memberNumber + ".";
       await sendSms({
         gymId,
         memberId,
@@ -2003,7 +2236,20 @@ var GymService = class {
         else serverMembershipAmount = gymDetails?.monthlyPrice || 4500;
       }
     }
-    const serverTotalAmount = serverMembershipAmount + serverAdmissionFee;
+    const serverBaseAmount = serverMembershipAmount + serverAdmissionFee;
+    const feeConfig = await this.getPaymentFeeConfig(businessId, data.paymentMethod);
+    const feeCalc = calculatePaymentFee(serverBaseAmount, data.paymentMethod, feeConfig.rate, feeConfig.enabled);
+    const serverPaymentFee = feeCalc.paymentFee;
+    const serverPaymentFeeRate = feeCalc.paymentFeeRate;
+    const serverFinalTotal = feeCalc.totalAmount;
+    if (data.paymentAmount !== void 0 || data.totalAmount !== void 0) {
+      const clientAmount = Number(data.totalAmount ?? data.paymentAmount);
+      if (Math.abs(clientAmount - serverFinalTotal) > 2) {
+        throw new Error(
+          `Security validation failed: Renewal payment total mismatch. Server calculated total is Rs. ${serverFinalTotal.toLocaleString()} (Base: Rs. ${serverBaseAmount.toLocaleString()}, ${serverPaymentFeeRate}% Fee: Rs. ${serverPaymentFee.toLocaleString()}), but received Rs. ${clientAmount.toLocaleString()}.`
+        );
+      }
+    }
     const membershipDoc = {
       id: Date.now(),
       businessId,
@@ -2015,7 +2261,10 @@ var GymService = class {
       status: "active",
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      baseAmount: serverBaseAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? "couple" : "individual",
       partnerName: member.partnerName || null,
@@ -2030,10 +2279,13 @@ var GymService = class {
       gymId,
       memberId: data.memberId,
       memberNumber: member.memberNumber,
-      amount: serverTotalAmount,
+      amount: serverFinalTotal,
+      baseAmount: serverBaseAmount,
       membershipAmount: serverMembershipAmount,
       admissionFee: serverAdmissionFee,
-      totalAmount: serverTotalAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: serverFinalTotal,
       admissionFeeApplied: isAdmissionApplied,
       memberType: isCouple ? "couple" : "individual",
       partnerName: member.partnerName || null,
@@ -2049,7 +2301,7 @@ var GymService = class {
     };
     if (db) {
       await db.collection("memberships").insertOne(membershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         await db.collection("payments").insertOne(paymentDoc);
       }
       await db.collection("members").updateOne({ id: data.memberId, businessId }, { $set: { status: "active", updatedAt: /* @__PURE__ */ new Date() } });
@@ -2081,7 +2333,7 @@ var GymService = class {
       }
     } else {
       mem.memberships.unshift(membershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         mem.payments.unshift(paymentDoc);
       }
       const mIdx = mem.members.findIndex((m) => m.id === data.memberId);
@@ -2119,7 +2371,7 @@ var GymService = class {
       const cleanPkg = data.package.replace(/_/g, " ").toUpperCase();
       const curr = gymDetails?.currency || "Rs.";
       const feeNote = isAdmissionApplied ? ` (incl. Admission Fee: ${curr} ${serverAdmissionFee.toLocaleString()})` : "";
-      const renewMsg = "Payment Received: " + curr + " " + serverTotalAmount.toLocaleString() + feeNote + " for " + member.fullName + ". Your " + (isCouple ? "COUPLE " : "") + cleanPkg + " membership at " + (gymDetails?.gymName || "Gym Management") + " is renewed until " + expiryDate + ".";
+      const renewMsg = "Payment Received: " + curr + " " + serverFinalTotal.toLocaleString() + feeNote + " for " + member.fullName + ". Your " + (isCouple ? "COUPLE " : "") + cleanPkg + " membership at " + (gymDetails?.gymName || "Gym Management") + " is renewed until " + expiryDate + ".";
       await sendSms({
         gymId,
         memberId: data.memberId,
@@ -2211,10 +2463,22 @@ var GymService = class {
     await ensureMongoSeeded();
     const db = await getMongoDb();
     const businessId = resolveBusinessId(gymIdOrBusinessId);
-    if (db) {
-      return db.collection("payments").find({ businessId }).sort({ id: -1 }).limit(limit).toArray();
-    }
-    return mem.payments.filter((p) => p.businessId === businessId || p.gymId === resolveGymId(gymIdOrBusinessId)).slice(0, limit);
+    const rawList = db ? await db.collection("payments").find({ businessId }).sort({ id: -1 }).limit(limit).toArray() : mem.payments.filter((p) => p.businessId === businessId || p.gymId === resolveGymId(gymIdOrBusinessId)).slice(0, limit);
+    return rawList.map((p) => {
+      const totalAmount = Number(p.totalAmount ?? p.amount ?? 0);
+      const baseAmount = Number(p.baseAmount ?? p.membershipAmount ?? totalAmount);
+      const paymentFee = Number(p.paymentFee ?? Math.max(0, totalAmount - baseAmount));
+      const paymentFeeRate = Number(p.paymentFeeRate ?? (baseAmount > 0 && paymentFee > 0 ? Math.round(paymentFee * 100 / baseAmount) : 0));
+      return {
+        ...p,
+        amount: totalAmount,
+        totalAmount,
+        baseAmount,
+        paymentFee,
+        paymentFeeRate,
+        paymentMethod: p.paymentMethod || "cash"
+      };
+    });
   }
   // =========================================================================
   // 5. PRODUCTS & INVENTORY (POS)
@@ -2425,7 +2689,21 @@ var GymService = class {
       });
     }
     const discount = Math.max(0, Number(data.discount) || 0);
-    const totalAmount = Math.max(0, subtotal - discount);
+    const baseAmount = Math.max(0, subtotal - discount);
+    const paymentMethod = data.paymentMethod || "cash";
+    const feeConfig = await this.getPaymentFeeConfig(businessId, paymentMethod);
+    const feeCalc = calculatePaymentFee(baseAmount, paymentMethod, feeConfig.rate, feeConfig.enabled);
+    const serverPaymentFee = feeCalc.paymentFee;
+    const serverPaymentFeeRate = feeCalc.paymentFeeRate;
+    const finalTotal = feeCalc.totalAmount;
+    if (data.totalAmount !== void 0 || data.finalAmount !== void 0) {
+      const clientAmount = Number(data.totalAmount ?? data.finalAmount);
+      if (Math.abs(clientAmount - finalTotal) > 2) {
+        throw new Error(
+          `Security validation failed: Sale payment total mismatch. Server calculated total is Rs. ${finalTotal.toLocaleString()} (Base: Rs. ${baseAmount.toLocaleString()}, ${serverPaymentFeeRate}% Fee: Rs. ${serverPaymentFee.toLocaleString()}), but received Rs. ${clientAmount.toLocaleString()}.`
+        );
+      }
+    }
     const receiptNumber = `REC-${Date.now().toString().slice(-6)}`;
     const saleDoc = {
       id: saleId,
@@ -2437,8 +2715,12 @@ var GymService = class {
       customerPhone: data.customerPhone || null,
       subtotal,
       discount,
-      totalAmount,
-      paymentMethod: data.paymentMethod || "cash",
+      baseAmount,
+      paymentFee: serverPaymentFee,
+      paymentFeeRate: serverPaymentFeeRate,
+      totalAmount: finalTotal,
+      finalAmount: finalTotal,
+      paymentMethod,
       paymentStatus: "paid",
       cashierName: data.cashierName || "admin",
       notes: data.notes || null,
@@ -2503,7 +2785,12 @@ var GymService = class {
       );
     }
     return list.map((s) => {
-      const finalAmount = Number(s.finalAmount ?? s.totalAmount ?? 0);
+      const subtotal = Number(s.subtotal || 0);
+      const discount = Number(s.discount || 0);
+      const baseAmount = Number(s.baseAmount ?? Math.max(0, subtotal - discount));
+      const paymentFee = Number(s.paymentFee || 0);
+      const paymentFeeRate = Number(s.paymentFeeRate || (baseAmount > 0 && paymentFee > 0 ? Math.round(paymentFee * 100 / baseAmount) : 0));
+      const finalAmount = Number(s.finalAmount ?? s.totalAmount ?? baseAmount + paymentFee);
       const isRefunded = s.status === "refunded" || s.paymentStatus === "refunded";
       const saleNumber = s.saleNumber || s.receiptNumber || `SAL-${s.id}`;
       return {
@@ -2514,8 +2801,11 @@ var GymService = class {
         memberId: s.memberId || null,
         customerName: s.customerName || "Walk-in Customer",
         customerPhone: s.customerPhone || null,
-        subtotal: Number(s.subtotal || finalAmount),
-        discount: Number(s.discount || 0),
+        subtotal: subtotal || finalAmount,
+        discount,
+        baseAmount,
+        paymentFee,
+        paymentFeeRate,
         finalAmount,
         totalAmount: finalAmount,
         paymentMethod: s.paymentMethod || "cash",
@@ -3359,9 +3649,51 @@ var GymService = class {
     const stats = await this.getDashboardStats(businessId);
     const payments = await this.getPayments(businessId, 500);
     const sales = await this.getSales(businessId, { limit: 500 });
+    const attendances = await this.getAttendanceHistory(businessId, 500);
+    const todayStr = formatDateStr(/* @__PURE__ */ new Date());
+    const filteredPayments = payments.filter((p) => {
+      if (options?.type === "daily") {
+        return p.paymentDate === todayStr;
+      }
+      if (options?.startDate && options?.endDate) {
+        return p.paymentDate >= options.startDate && p.paymentDate <= options.endDate;
+      }
+      return true;
+    });
+    const filteredAttendances = attendances.filter((a) => {
+      if (options?.type === "daily") {
+        return a.attendanceDate === todayStr;
+      }
+      if (options?.startDate && options?.endDate) {
+        return a.attendanceDate >= options.startDate && a.attendanceDate <= options.endDate;
+      }
+      return true;
+    });
+    const dailyPayments = payments.filter((p) => p.paymentDate === todayStr);
+    const dailyAttendances = attendances.filter((a) => a.attendanceDate === todayStr);
+    const cashRevenue = dailyPayments.filter((p) => p.paymentMethod === "cash").reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const bankTransferRevenue = dailyPayments.filter((p) => p.paymentMethod !== "cash").reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const totalRevenue = cashRevenue + bankTransferRevenue;
+    const daily = {
+      totalRevenue: totalRevenue || Number(stats.todayRevenue || 0),
+      cashRevenue: cashRevenue || Number(stats.todayRevenue || 0),
+      bankTransferRevenue,
+      totalCheckIns: dailyAttendances.length || Number(stats.todayCheckInsCount || 0)
+    };
+    const finalPaymentsList = filteredPayments.length > 0 ? filteredPayments : payments;
+    const finalAttendancesList = filteredAttendances.length > 0 ? filteredAttendances : attendances;
     return {
+      daily,
       stats,
-      payments,
+      payments: {
+        items: finalPaymentsList,
+        totalAmount: finalPaymentsList.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+        count: finalPaymentsList.length
+      },
+      attendances: {
+        items: finalAttendancesList,
+        count: finalAttendancesList.length
+      },
       sales,
       generatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
@@ -3874,6 +4206,8 @@ app.post("/api/members", requireAuth, requireGymTenant, async (req, res) => {
       startDate: paymentDate,
       paymentAmount: paymentAmount !== void 0 ? Number(paymentAmount) : void 0,
       membershipAmount: membershipAmount !== void 0 ? Number(membershipAmount) : void 0,
+      baseAmount: req.body.baseAmount !== void 0 ? Number(req.body.baseAmount) : void 0,
+      totalAmount: req.body.totalAmount !== void 0 ? Number(req.body.totalAmount) : void 0,
       addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
       admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
       memberType: memberType === "couple" ? "couple" : "individual",
@@ -3990,6 +4324,8 @@ app.post("/api/members/:id/renew", requireAuth, requireGymTenant, async (req, re
         startDate,
         paymentAmount: paymentAmount !== void 0 ? Number(paymentAmount) : void 0,
         membershipAmount: membershipAmount !== void 0 ? Number(membershipAmount) : void 0,
+        baseAmount: req.body.baseAmount !== void 0 ? Number(req.body.baseAmount) : void 0,
+        totalAmount: req.body.totalAmount !== void 0 ? Number(req.body.totalAmount) : void 0,
         addAdmissionFee: Boolean(addAdmissionFee ?? admissionFeeApplied),
         admissionFeeApplied: Boolean(addAdmissionFee ?? admissionFeeApplied),
         memberType,
@@ -4132,7 +4468,7 @@ app.get("/api/sales", requireAuth, requireGymTenant, async (req, res) => {
 app.post("/api/sales", requireAuth, requireGymTenant, async (req, res) => {
   try {
     const businessId = req.businessId || resolveBusinessId(req.gymId);
-    const { memberId, customerName, customerPhone, items, discount, paymentMethod } = req.body;
+    const { memberId, customerName, customerPhone, items, discount, paymentMethod, baseAmount, totalAmount, finalAmount } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "Items array is required for a sale." });
     }
@@ -4142,6 +4478,9 @@ app.post("/api/sales", requireAuth, requireGymTenant, async (req, res) => {
       customerPhone,
       items,
       discount: Number(discount || 0),
+      baseAmount: baseAmount !== void 0 ? Number(baseAmount) : void 0,
+      totalAmount: totalAmount !== void 0 ? Number(totalAmount) : void 0,
+      finalAmount: finalAmount !== void 0 ? Number(finalAmount) : void 0,
       paymentMethod: paymentMethod || "cash",
       createdBy: req.user?.name || "Staff"
     });

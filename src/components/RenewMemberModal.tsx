@@ -73,9 +73,7 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
     }
   }, [isOpen, refreshBusiness]);
 
-  if (!isOpen || !member) return null;
-
-  const currentExpiry = member.latestMembership?.expiryDate || null;
+  const currentExpiry = member?.latestMembership?.expiryDate || null;
   const isCurrentlyActive = currentExpiry ? currentExpiry >= paymentDate : false;
 
   // Base date for extension:
@@ -109,6 +107,8 @@ export const RenewMemberModal: React.FC<RenewMemberModalProps> = ({
   }, [baseAmount, paymentMethod, configuredFeeRate, feeEnabled]);
 
   const totalAmount = feeCalc.totalAmount;
+
+  if (!isOpen || !member) return null;
 
   const handlePackageChange = (pkg: 'monthly' | '3_months' | '6_months' | 'annual') => {
     setMembershipPackage(pkg);

@@ -21,6 +21,9 @@ export const ReportsView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const today = getColomboToday();
 
+  const paymentItems: any[] = data?.payments?.items || (Array.isArray(data?.payments) ? data.payments : []);
+  const attendanceItems: any[] = data?.attendances?.items || (Array.isArray(data?.attendances) ? data.attendances : []);
+
   useEffect(() => {
     loadReport();
   }, [reportType]);
@@ -106,112 +109,118 @@ export const ReportsView: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Daily Closeout Summary */}
-            {data?.daily && (
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="p-5 rounded-2xl bg-black/40 border border-white/5">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Today's Revenue</span>
-                  <p className="text-2xl font-black italic text-white mt-1">
-                    {business.currency} {data.daily.totalRevenue.toLocaleString()}
-                  </p>
-                </div>
-                <div className="p-5 rounded-2xl bg-black/40 border border-white/5">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Cash Register</span>
-                  <p className="text-2xl font-black italic text-orange-400 mt-1">
-                    {business.currency} {data.daily.cashRevenue.toLocaleString()}
-                  </p>
-                </div>
-                <div className="p-5 rounded-2xl bg-black/40 border border-white/5">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Bank Transfers</span>
-                  <p className="text-2xl font-black italic text-green-400 mt-1">
-                    {business.currency} {data.daily.bankTransferRevenue.toLocaleString()}
-                  </p>
-                </div>
-                <div className="p-5 rounded-2xl bg-black/40 border border-[#FACC15]/20">
-                  <span className="text-[10px] font-bold text-[#FACC15] uppercase tracking-wider">Athlete Check-ins</span>
-                  <p className="text-2xl font-black italic text-[#FACC15] mt-1">
-                    {data.daily.totalCheckIns}
-                  </p>
-                </div>
-              </div>
-            )}
+                {/* Daily Closeout Summary */}
+                {data?.daily && (
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                    <div className="p-5 rounded-2xl bg-black/40 border border-white/5">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Today's Revenue</span>
+                      <p className="text-2xl font-black italic text-white mt-1">
+                        {business.currency} {(data.daily.totalRevenue || 0).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="p-5 rounded-2xl bg-black/40 border border-white/5">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Cash Register</span>
+                      <p className="text-2xl font-black italic text-orange-400 mt-1">
+                        {business.currency} {(data.daily.cashRevenue || 0).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="p-5 rounded-2xl bg-black/40 border border-white/5">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Bank Transfers</span>
+                      <p className="text-2xl font-black italic text-green-400 mt-1">
+                        {business.currency} {(data.daily.bankTransferRevenue || 0).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="p-5 rounded-2xl bg-black/40 border border-[#FACC15]/20">
+                      <span className="text-[10px] font-bold text-[#FACC15] uppercase tracking-wider">Athlete Check-ins</span>
+                      <p className="text-2xl font-black italic text-[#FACC15] mt-1">
+                        {data.daily.totalCheckIns || 0}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-            {/* Payments Table */}
-            {data?.payments?.items && (
-              <div>
-                <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">
-                  Transaction Audit ({data.payments.items.length} records)
-                </h3>
-                <div className="border border-white/5 rounded-2xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="bg-white/[0.02] text-gray-500 font-black text-[10px] uppercase tracking-widest border-b border-white/5">
-                        <th className="py-3 px-3">Receipt</th>
-                        <th className="py-3 px-3">Member #</th>
-                        <th className="py-3 px-3">Package</th>
-                        <th className="py-3 px-3">Amount</th>
-                        <th className="py-3 px-3">Method</th>
-                        <th className="py-3 px-3">Valid Until</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.03]">
-                      {data.payments.items.map((p: any) => (
-                        <tr key={p.id} className="hover:bg-white/[0.02]">
-                          <td className="py-3 px-3 font-mono text-gray-500">#{p.id}</td>
-                          <td className="py-3 px-3">
-                            <span className="px-2 py-0.5 rounded bg-black/40 border border-white/10 font-mono font-bold text-[#FACC15]">
-                              {p.memberNumber}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 capitalize font-bold text-gray-300">{p.package.replace('_', ' ')}</td>
-                          <td className="py-3 px-3 font-black text-white">{business.currency} {p.amount.toLocaleString()}</td>
-                          <td className="py-3 px-3 uppercase text-[9px] font-bold text-gray-400">
-                            {p.paymentMethod.replace('_', ' ')}
-                          </td>
-                          <td className="py-3 px-3 font-mono text-gray-400">{p.newExpiryDate}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+                {/* Payments Table */}
+                {paymentItems.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">
+                      Transaction Audit ({paymentItems.length} records)
+                    </h3>
+                    <div className="border border-white/5 rounded-2xl overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-white/[0.02] text-gray-500 font-black text-[10px] uppercase tracking-widest border-b border-white/5">
+                            <th className="py-3 px-3">Receipt</th>
+                            <th className="py-3 px-3">Member #</th>
+                            <th className="py-3 px-3">Package</th>
+                            <th className="py-3 px-3">Amount</th>
+                            <th className="py-3 px-3">Method</th>
+                            <th className="py-3 px-3">Valid Until</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/[0.03]">
+                          {paymentItems.map((p: any) => (
+                            <tr key={p.id} className="hover:bg-white/[0.02]">
+                              <td className="py-3 px-3 font-mono text-gray-500">#{p.id}</td>
+                              <td className="py-3 px-3">
+                                <span className="px-2 py-0.5 rounded bg-black/40 border border-white/10 font-mono font-bold text-[#FACC15]">
+                                  {p.memberNumber}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 capitalize font-bold text-gray-300">{(p.package || 'monthly').replace('_', ' ')}</td>
+                              <td className="py-3 px-3 font-black text-white">{business.currency} {(p.amount || 0).toLocaleString()}</td>
+                              <td className="py-3 px-3 uppercase text-[9px] font-bold text-gray-400">
+                                {(p.paymentMethod || 'cash').replace('_', ' ')}
+                              </td>
+                              <td className="py-3 px-3 font-mono text-gray-400">{p.newExpiryDate || p.expiryDate || 'N/A'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
 
-            {/* Attendance Audit Table */}
-            {data?.attendances?.items && (
-              <div>
-                <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">
-                  Verified Check-in Logs ({data.attendances.items.length} visits)
-                </h3>
-                <div className="border border-white/5 rounded-2xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="bg-white/[0.02] text-gray-500 font-black text-[10px] uppercase tracking-widest border-b border-white/5">
-                        <th className="py-3 px-3">Time</th>
-                        <th className="py-3 px-3">Member #</th>
-                        <th className="py-3 px-3">Athlete Name</th>
-                        <th className="py-3 px-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.03]">
-                      {data.attendances.items.map((a: any) => (
-                        <tr key={a.id} className="hover:bg-white/[0.02]">
-                          <td className="py-3 px-3 font-mono text-[#FACC15] font-black">{a.attendanceTime}</td>
-                          <td className="py-3 px-3 font-mono font-bold text-gray-300">{a.memberNumber}</td>
-                          <td className="py-3 px-3 font-bold text-white">{a.memberName || 'Gym Member'}</td>
-                          <td className="py-3 px-3">
-                            <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-green-500/15 border border-green-500/30 text-green-400">
-                              Verified
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {/* Attendance Audit Table */}
+                {attendanceItems.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">
+                      Verified Check-in Logs ({attendanceItems.length} visits)
+                    </h3>
+                    <div className="border border-white/5 rounded-2xl overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-white/[0.02] text-gray-500 font-black text-[10px] uppercase tracking-widest border-b border-white/5">
+                            <th className="py-3 px-3">Time</th>
+                            <th className="py-3 px-3">Member #</th>
+                            <th className="py-3 px-3">Athlete Name</th>
+                            <th className="py-3 px-3">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/[0.03]">
+                          {attendanceItems.map((a: any) => (
+                            <tr key={a.id} className="hover:bg-white/[0.02]">
+                              <td className="py-3 px-3 font-mono text-[#FACC15] font-black">{a.attendanceTime || a.time || 'Check-in'}</td>
+                              <td className="py-3 px-3 font-mono font-bold text-gray-300">{a.memberNumber}</td>
+                              <td className="py-3 px-3 font-bold text-white">{a.memberName || a.fullName || 'Gym Member'}</td>
+                              <td className="py-3 px-3">
+                                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-green-500/15 border border-green-500/30 text-green-400">
+                                  Verified
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {!data?.daily && paymentItems.length === 0 && attendanceItems.length === 0 && (
+                  <div className="py-16 text-center text-gray-500 font-bold text-xs uppercase tracking-wider">
+                    No transactions or check-in activity recorded for this report.
+                  </div>
+                )}
               </div>
-            )}
-          </div>
         )}
       </div>
     </div>

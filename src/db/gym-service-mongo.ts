@@ -1179,7 +1179,23 @@ export async function ensureMongoSeeded() {
       await db.collection('payments').insertMany(initialStore.payments);
       await db.collection('products').insertMany(initialStore.products);
       await db.collection('settings').insertMany(initialStore.settings);
+      if (initialStore.sales && initialStore.sales.length > 0) {
+        await db.collection('sales').insertMany(initialStore.sales);
+      }
+      if (initialStore.attendance && initialStore.attendance.length > 0) {
+        await db.collection('attendance').insertMany(initialStore.attendance);
+      }
       console.log('Initial seed complete.');
+    } else {
+      // Backfill sales and attendance collections if empty
+      const salesCount = await db.collection('sales').countDocuments();
+      if (salesCount === 0 && initialStore.sales && initialStore.sales.length > 0) {
+        await db.collection('sales').insertMany(initialStore.sales);
+      }
+      const attendanceCount = await db.collection('attendance').countDocuments();
+      if (attendanceCount === 0 && initialStore.attendance && initialStore.attendance.length > 0) {
+        await db.collection('attendance').insertMany(initialStore.attendance);
+      }
     }
     global._mongoInitialized = true;
   } catch (err) {
@@ -1575,13 +1591,13 @@ export class GymService {
     if (db) {
       await db.collection('members').insertOne(newMemberDoc);
       await db.collection('memberships').insertOne(newMembershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         await db.collection('payments').insertOne(newPaymentDoc);
       }
     } else {
       mem.members.unshift(newMemberDoc);
       mem.memberships.unshift(newMembershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         mem.payments.unshift(newPaymentDoc);
       }
     }
@@ -1651,7 +1667,7 @@ export class GymService {
       const cleanPkg = data.package.replace(/_/g, ' ').toUpperCase();
       const curr = gymDetails?.currency || 'Rs.';
       const feeNote = isAdmissionApplied ? ` (incl. Admission Fee: ${curr} ${serverAdmissionFee.toLocaleString()})` : '';
-      const welcomeMsg = 'Welcome to ' + gymName + ', ' + data.fullName + '! Your ' + (isCouple ? 'COUPLE ' : '') + cleanPkg + ' membership is active until ' + expiryDate + '. Payment received: ' + curr + ' ' + serverTotalAmount.toLocaleString() + feeNote + '. Member ID: ' + memberNumber + '.';
+      const welcomeMsg = 'Welcome to ' + gymName + ', ' + data.fullName + '! Your ' + (isCouple ? 'COUPLE ' : '') + cleanPkg + ' membership is active until ' + expiryDate + '. Payment received: ' + curr + ' ' + serverFinalTotal.toLocaleString() + feeNote + '. Member ID: ' + memberNumber + '.';
       await sendSms({
         gymId,
         memberId,
@@ -1908,7 +1924,7 @@ export class GymService {
 
     if (db) {
       await db.collection('memberships').insertOne(membershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         await db.collection('payments').insertOne(paymentDoc);
       }
       await db.collection('members').updateOne({ id: data.memberId, businessId }, { $set: { status: 'active', updatedAt: new Date() } });
@@ -1942,7 +1958,7 @@ export class GymService {
       }
     } else {
       mem.memberships.unshift(membershipDoc);
-      if (serverTotalAmount > 0) {
+      if (serverFinalTotal > 0) {
         mem.payments.unshift(paymentDoc);
       }
       const mIdx = mem.members.findIndex((m) => m.id === data.memberId);
@@ -1983,7 +1999,7 @@ export class GymService {
       const cleanPkg = data.package.replace(/_/g, ' ').toUpperCase();
       const curr = gymDetails?.currency || 'Rs.';
       const feeNote = isAdmissionApplied ? ` (incl. Admission Fee: ${curr} ${serverAdmissionFee.toLocaleString()})` : '';
-      const renewMsg = 'Payment Received: ' + curr + ' ' + serverTotalAmount.toLocaleString() + feeNote + ' for ' + member.fullName + '. Your ' + (isCouple ? 'COUPLE ' : '') + cleanPkg + ' membership at ' + (gymDetails?.gymName || 'Gym Management') + ' is renewed until ' + expiryDate + '.';
+      const renewMsg = 'Payment Received: ' + curr + ' ' + serverFinalTotal.toLocaleString() + feeNote + ' for ' + member.fullName + '. Your ' + (isCouple ? 'COUPLE ' : '') + cleanPkg + ' membership at ' + (gymDetails?.gymName || 'Gym Management') + ' is renewed until ' + expiryDate + '.';
       await sendSms({
         gymId,
         memberId: data.memberId,
@@ -3570,10 +3586,65 @@ export class GymService {
     const stats = await this.getDashboardStats(businessId);
     const payments = await this.getPayments(businessId, 500);
     const sales = await this.getSales(businessId, { limit: 500 });
+    const attendances = await this.getAttendanceHistory(businessId, 500);
+
+    const todayStr = formatDateStr(new Date());
+
+    const filteredPayments = payments.filter((p) => {
+      if (options?.type === 'daily') {
+        return p.paymentDate === todayStr;
+      }
+      if (options?.startDate && options?.endDate) {
+        return p.paymentDate >= options.startDate && p.paymentDate <= options.endDate;
+      }
+      return true;
+    });
+
+    const filteredAttendances = attendances.filter((a) => {
+      if (options?.type === 'daily') {
+        return a.attendanceDate === todayStr;
+      }
+      if (options?.startDate && options?.endDate) {
+        return a.attendanceDate >= options.startDate && a.attendanceDate <= options.endDate;
+      }
+      return true;
+    });
+
+    const dailyPayments = payments.filter((p) => p.paymentDate === todayStr);
+    const dailyAttendances = attendances.filter((a) => a.attendanceDate === todayStr);
+
+    const cashRevenue = dailyPayments
+      .filter((p) => p.paymentMethod === 'cash')
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+    const bankTransferRevenue = dailyPayments
+      .filter((p) => p.paymentMethod !== 'cash')
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+    const totalRevenue = cashRevenue + bankTransferRevenue;
+
+    const daily = {
+      totalRevenue: totalRevenue || Number(stats.todayRevenue || 0),
+      cashRevenue: cashRevenue || Number(stats.todayRevenue || 0),
+      bankTransferRevenue,
+      totalCheckIns: dailyAttendances.length || Number(stats.todayCheckInsCount || 0),
+    };
+
+    const finalPaymentsList = filteredPayments.length > 0 ? filteredPayments : payments;
+    const finalAttendancesList = filteredAttendances.length > 0 ? filteredAttendances : attendances;
 
     return {
+      daily,
       stats,
-      payments,
+      payments: {
+        items: finalPaymentsList,
+        totalAmount: finalPaymentsList.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+        count: finalPaymentsList.length,
+      },
+      attendances: {
+        items: finalAttendancesList,
+        count: finalAttendancesList.length,
+      },
       sales,
       generatedAt: new Date().toISOString(),
     };
