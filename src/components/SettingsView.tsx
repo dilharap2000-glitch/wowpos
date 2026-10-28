@@ -2149,7 +2149,7 @@ export const SettingsView: React.FC = () => {
               <div className="space-y-1.5 text-gray-300 text-[11px] leading-relaxed bg-white/5 p-3 rounded-2xl border border-white/5">
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
-                  <span><strong>2 Days Before:</strong> Renewal reminder SMS</span>
+                  <span><strong>3 Days Before:</strong> Expired Soon reminder SMS</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
@@ -2157,11 +2157,11 @@ export const SettingsView: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
-                  <span><strong>3 Days After:</strong> Overdue renewal SMS</span>
+                  <span><strong>3 Days After:</strong> First Overdue reminder SMS</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
-                  <span><strong>Every 7 Days:</strong> Weekly reminders until renewal</span>
+                  <span><strong>Every 3 Days:</strong> Recurring overdue SMS until renewal</span>
                 </div>
                 <div className="flex items-center gap-2 text-emerald-400 font-semibold pt-1 border-t border-white/10">
                   <CheckCircle2 className="w-3.5 h-3.5" />
@@ -2170,22 +2170,38 @@ export const SettingsView: React.FC = () => {
               </div>
 
               {reminderStats && (
-                <div className="grid grid-cols-4 gap-2 text-center">
-                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Pending</span>
-                    <span className="text-xs font-bold text-white">{reminderStats.pending || 0}</span>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-1.5 text-center">
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                      <span className="text-[9px] text-gray-400 uppercase block font-bold">Expired Soon</span>
+                      <span className="text-xs font-bold text-[#FACC15]">{reminderStats.expiredSoon || 0}</span>
+                    </div>
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                      <span className="text-[9px] text-gray-400 uppercase block font-bold">Due Today</span>
+                      <span className="text-xs font-bold text-orange-400">{reminderStats.dueToday || 0}</span>
+                    </div>
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                      <span className="text-[9px] text-gray-400 uppercase block font-bold">Overdue</span>
+                      <span className="text-xs font-bold text-red-400">{reminderStats.overdue || 0}</span>
+                    </div>
                   </div>
-                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Sent</span>
-                    <span className="text-xs font-bold text-emerald-400">{reminderStats.sent || 0}</span>
-                  </div>
-                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Failed</span>
-                    <span className="text-xs font-bold text-red-400">{reminderStats.failed || 0}</span>
-                  </div>
-                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Reset/Cancelled</span>
-                    <span className="text-xs font-bold text-gray-400">{reminderStats.cancelled || 0}</span>
+                  <div className="grid grid-cols-4 gap-1.5 text-center">
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                      <span className="text-[9px] text-gray-400 uppercase block font-bold">Accepted</span>
+                      <span className="text-xs font-bold text-blue-400">{reminderStats.accepted || (reminderStats as any).sent || 0}</span>
+                    </div>
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                      <span className="text-[9px] text-gray-400 uppercase block font-bold">Delivered</span>
+                      <span className="text-xs font-bold text-emerald-400">{reminderStats.delivered || 0}</span>
+                    </div>
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                      <span className="text-[9px] text-gray-400 uppercase block font-bold">Failed</span>
+                      <span className="text-xs font-bold text-red-400">{reminderStats.failed || 0}</span>
+                    </div>
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                      <span className="text-[9px] text-gray-400 uppercase block font-bold">Cancelled</span>
+                      <span className="text-xs font-bold text-gray-400">{reminderStats.cancelled || 0}</span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2312,20 +2328,22 @@ export const SettingsView: React.FC = () => {
                       </td>
                       <td className="p-4 text-xs whitespace-nowrap">
                         <span className="font-bold text-gray-200 uppercase text-[11px]">
-                          {item.reminderType === 'reminder_2_days'
-                            ? '⏳ 2 Days Before Expiry'
+                          {item.reminderType === 'expired_soon' || item.reminderType === 'reminder_3_days' || (item.reminderType as string) === 'reminder_2_days'
+                            ? '⏳ Expired Soon (3 Days Before)'
                             : item.reminderType === 'due_today'
                             ? '🟠 Due Today'
-                            : item.reminderType === 'overdue_3_days'
-                            ? '🔴 3 Days Overdue'
-                            : '🔁 Weekly Overdue Reminder'}
+                            : item.reminderType === 'overdue' || item.reminderType === 'overdue_3_days'
+                            ? '🔴 Overdue (Every 3 Days)'
+                            : '🔴 Overdue Notice'}
                         </span>
                       </td>
                       <td className="p-4 whitespace-nowrap">
                         <span
                           className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                            item.status === 'delivered' || item.status === 'sent'
+                            item.status === 'delivered'
                               ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                              : item.status === 'accepted' || item.status === 'sent'
+                              ? 'bg-blue-950 text-blue-400 border border-blue-800/50'
                               : item.status === 'pending'
                               ? 'bg-yellow-950 text-yellow-400 border border-yellow-800/50'
                               : item.status === 'cancelled' || item.status === 'invalidated'
@@ -2333,7 +2351,11 @@ export const SettingsView: React.FC = () => {
                               : 'bg-red-950 text-red-400 border border-red-800/50'
                           }`}
                         >
-                          {item.status === 'cancelled' ? 'Reset (Renewed)' : item.status}
+                          {item.status === 'accepted'
+                            ? 'Accepted / Queued'
+                            : item.status === 'cancelled'
+                            ? 'Reset (Renewed)'
+                            : item.status}
                         </span>
                       </td>
                       <td className="p-4 font-mono text-xs text-center text-gray-400">

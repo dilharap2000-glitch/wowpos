@@ -1,7 +1,7 @@
 import { getMongoDb } from '../../db/mongodb.ts';
 import { sendSms } from './smslen.ts';
 import { getColomboToday, addDaysToDateStr, getDaysRemaining } from '../date-utils.ts';
-import type { ReminderType, ReminderStatus, MembershipReminder } from '../../types.ts';
+import type { ReminderType, ReminderStatus, MembershipReminder, ReminderStats } from '../../types.ts';
 
 // In-memory fallback storage when running without MongoDB
 const memoryMembershipReminders: MembershipReminder[] = [];
@@ -218,15 +218,15 @@ export class ReminderService {
       scheduledDate: string;
     }> = [
       {
-        type: 'reminder_2_days',
-        scheduledDate: addDaysToDateStr(expiryDate, -2),
+        type: 'expired_soon',
+        scheduledDate: addDaysToDateStr(expiryDate, -3),
       },
       {
         type: 'due_today',
         scheduledDate: expiryDate,
       },
       {
-        type: 'overdue_3_days',
+        type: 'overdue',
         scheduledDate: addDaysToDateStr(expiryDate, 3),
       },
     ];
@@ -340,6 +340,16 @@ export class ReminderService {
       for (const member of members) {
         processed++;
 
+        // Stop Condition 1: Exclude inactive, suspended, or archived members
+        if (
+          member.status === 'inactive' ||
+          member.status === 'suspended' ||
+          member.status === 'archived' ||
+          member.archivedAt
+        ) {
+          continue;
+        }
+
         // Get member's latest membership
         let latestMembership: any = null;
         if (db) {
@@ -351,6 +361,11 @@ export class ReminderService {
         }
 
         if (!latestMembership || !latestMembership.expiryDate) {
+          continue;
+        }
+
+        // Stop Condition 2: If membership is explicitly cancelled or inactive
+        if (latestMembership.status === 'inactive' || latestMembership.status === 'cancelled') {
           continue;
         }
 
@@ -379,21 +394,18 @@ export class ReminderService {
         const expiryDate = latestMembership.expiryDate;
         const daysRemaining = getDaysRemaining(expiryDate, targetDate);
 
-        // Determine if any reminder is scheduled for targetDate according to business rules:
-        // - 2 days before expiry: reminder_2_days (daysRemaining === 2)
-        // - On expiry date: due_today (daysRemaining === 0)
-        // - 3 days after expiry: overdue_3_days (daysRemaining === -3)
-        // - Every 7 days after 3-day overdue: overdue_weekly (daysRemaining <= -10 && (-daysRemaining - 3) % 7 === 0)
+        // REQUIRED SMS SCHEDULE (Asia/Colombo):
+        // 1. EXPIRED SOON: Send exactly 3 calendar days before membership expiry date (daysRemaining === 3)
+        // 2. DUE TODAY: Send on membership expiry date if unpaid/unrenewed (daysRemaining === 0)
+        // 3. OVERDUE: Send 3 calendar days after expiry date (daysRemaining === -3), and continue sending every 3 calendar days (-6, -9, -12, ...) until member renews
         let activeReminderType: ReminderType | null = null;
 
-        if (daysRemaining === 2) {
-          activeReminderType = 'reminder_2_days';
+        if (daysRemaining === 3) {
+          activeReminderType = 'expired_soon';
         } else if (daysRemaining === 0) {
           activeReminderType = 'due_today';
-        } else if (daysRemaining === -3) {
-          activeReminderType = 'overdue_3_days';
-        } else if (daysRemaining <= -10 && (-daysRemaining - 3) % 7 === 0) {
-          activeReminderType = 'overdue_weekly';
+        } else if (daysRemaining <= -3 && (-daysRemaining) % 3 === 0) {
+          activeReminderType = 'overdue';
         }
 
         if (!activeReminderType) {
@@ -401,7 +413,7 @@ export class ReminderService {
           continue;
         }
 
-        // Construct unique reminder key
+        // Construct unique deterministic reminder key
         const reminderKey = this.buildReminderKey(
           businessId,
           member.id,
@@ -411,7 +423,7 @@ export class ReminderService {
         );
 
         // ATOMIC CLAIM & DUPLICATE PREVENTION:
-        // 1. Check if this reminder was already processed or cancelled
+        // Check if this reminder was already accepted, sent, delivered, or cancelled
         let existingReminder: any = null;
         if (db) {
           existingReminder = await db.collection('membershipReminders').findOne({ reminderKey });
@@ -420,7 +432,11 @@ export class ReminderService {
         }
 
         if (existingReminder) {
-          if (existingReminder.status === 'sent' || existingReminder.status === 'delivered') {
+          if (
+            existingReminder.status === 'accepted' ||
+            existingReminder.status === 'sent' ||
+            existingReminder.status === 'delivered'
+          ) {
             skippedDuplicates++;
             results.push({
               reminderKey,
@@ -579,18 +595,15 @@ export class ReminderService {
         let smsMessage = '';
         let providerMsgType: 'expiring_soon' | 'due_today' | 'expired' = 'expiring_soon';
 
-        if (activeReminderType === 'reminder_2_days') {
+        if (activeReminderType === 'expired_soon' || (activeReminderType as string) === 'reminder_3_days' || (activeReminderType as string) === 'reminder_2_days') {
           providerMsgType = 'expiring_soon';
-          smsMessage = `Reminder: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} will expire in 2 days on ${expiryDate}. Please renew to continue seamless access.`;
+          smsMessage = `Reminder: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} will expire soon on ${expiryDate}. Please renew and pay on time.`;
         } else if (activeReminderType === 'due_today') {
           providerMsgType = 'due_today';
-          smsMessage = `Payment Due Today: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} expires today (${expiryDate}). Please renew today to maintain your membership.`;
-        } else if (activeReminderType === 'overdue_3_days') {
-          providerMsgType = 'expired';
-          smsMessage = `Overdue Notice: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} expired on ${expiryDate} and is now overdue. Please renew today to reactivate access.`;
+          smsMessage = `Payment Due Today: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} expires today (${expiryDate}). Please complete payment.`;
         } else {
           providerMsgType = 'expired';
-          smsMessage = `Renewal Reminder: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} remains expired since ${expiryDate}. Please contact us or visit reception to renew.`;
+          smsMessage = `Overdue Notice: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} expired on ${expiryDate} and is overdue. Please renew and complete payment.`;
         }
 
         // Dispatch SMS via existing SMSlenz service
@@ -604,10 +617,11 @@ export class ReminderService {
             message: smsMessage,
           });
 
+          // Distinguish 'delivered' vs 'accepted' (queued) vs 'failed'
           const finalStatus: ReminderStatus = sendRes.success
             ? sendRes.status === 'delivered'
               ? 'delivered'
-              : 'sent'
+              : 'accepted'
             : 'failed';
 
           if (db) {
@@ -757,28 +771,42 @@ export class ReminderService {
   }
 
   /**
-   * Returns summary counts of reminders for a tenant
+   * Returns summary counts of reminders for a tenant across types and lifecycle statuses
    */
-  static async getReminderStats(businessId: string): Promise<{
-    pending: number;
-    sent: number;
-    delivered: number;
-    failed: number;
-    cancelled: number;
-    total: number;
-  }> {
-    const reminders = await this.getReminders(businessId, { limit: 1000 });
-    const stats = {
+  static async getReminderStats(businessId: string): Promise<ReminderStats> {
+    const reminders = await this.getReminders(businessId, { limit: 2000 });
+    const stats: ReminderStats = {
+      expiredSoon: 0,
+      dueToday: 0,
+      overdue: 0,
       pending: 0,
-      sent: 0,
+      accepted: 0,
       delivered: 0,
       failed: 0,
       cancelled: 0,
       total: reminders.length,
     };
     for (const r of reminders) {
-      if (r.status === 'pending') stats.pending++;
-      else if (r.status === 'sent') stats.sent++;
+      // By type:
+      if (
+        r.reminderType === 'expired_soon' ||
+        (r.reminderType as string) === 'reminder_3_days' ||
+        (r.reminderType as string) === 'reminder_2_days'
+      ) {
+        stats.expiredSoon++;
+      } else if (r.reminderType === 'due_today') {
+        stats.dueToday++;
+      } else if (
+        r.reminderType === 'overdue' ||
+        (r.reminderType as string) === 'overdue_3_days' ||
+        (r.reminderType as string) === 'overdue_weekly'
+      ) {
+        stats.overdue++;
+      }
+
+      // By status:
+      if (r.status === 'pending' || r.status === 'processing') stats.pending++;
+      else if (r.status === 'accepted' || r.status === 'sent') stats.accepted++;
       else if (r.status === 'delivered') stats.delivered++;
       else if (r.status === 'failed') stats.failed++;
       else if (r.status === 'cancelled' || r.status === 'invalidated') stats.cancelled++;

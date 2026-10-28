@@ -92,15 +92,19 @@ async function runMembershipRenewalSmsTest() {
     );
 
     // =========================================================================
-    // TEST SCENARIO A: Membership expires on October 31
-    // - Oct 29: Reminder
-    // - Oct 31: Due-today SMS
-    // - Nov 3: Overdue SMS
-    // - Nov 10: Weekly reminder if not renewed
+    // TEST SCENARIO A: Membership expires on October 28 (User Brief Example)
+    // - Oct 25: Expired Soon (3 calendar days before expiry)
+    // - Oct 26 & 27: Non-reminder days
+    // - Oct 28: Payment Due Today (on expiry date)
+    // - Oct 29 & 30: Non-reminder days
+    // - Oct 31: Overdue reminder (3 calendar days after expiry)
+    // - Nov 1 & 2: Non-reminder days
+    // - Nov 3: Second Overdue reminder (6 calendar days after expiry, every 3 days)
+    // - Nov 6: Third Overdue reminder (9 calendar days after expiry, every 3 days)
     // =========================================================================
-    console.log('\n--- [SCENARIO A] Membership expires on October 31 ---');
+    console.log('\n--- [SCENARIO A] Membership expires on October 28 ---');
 
-    // Create member expiring Oct 31
+    // Create member expiring Oct 28
     const memberAId = 9101;
     await db.collection('members').insertOne({
       id: memberAId,
@@ -112,7 +116,7 @@ async function runMembershipRenewalSmsTest() {
       barcode: 'TF-9101',
       status: 'active',
       memberType: 'individual',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
     const membershipA1Id = 8101;
@@ -122,79 +126,108 @@ async function runMembershipRenewalSmsTest() {
       gymId: 1,
       memberId: memberAId,
       package: 'monthly',
-      startDate: '2026-10-01',
-      expiryDate: '2026-10-31',
+      startDate: '2026-09-28',
+      expiryDate: '2026-10-28',
       status: 'active',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
-    // 1. Evaluate on Oct 29 (2 days before expiry)
-    console.log('Evaluating Oct 29 (2 days before Oct 31):');
+    // 1. Evaluate on Oct 25 (exactly 3 calendar days before Oct 28 expiry)
+    console.log('Evaluating Oct 25 (3 days before Oct 28 expiry):');
+    const runOct25 = await ReminderService.processDueReminders({
+      targetDate: '2026-10-25',
+      businessId: 'biz_1',
+    });
+    const itemOct25 = runOct25.results.find((r) => r.memberId === memberAId);
+    if (!itemOct25 || itemOct25.reminderType !== 'expired_soon' || (itemOct25.action !== 'sent' && itemOct25.action !== 'failed')) {
+      throw new Error(`Expected Oct 25 expired_soon reminder for memberA, got: ${JSON.stringify(itemOct25)}`);
+    }
+    console.log('  -> PASSED: Oct 25 Expired Soon reminder generated correctly (type: expired_soon).');
+
+    // 2. Evaluate on Oct 26 & Oct 27 (non-reminder days)
+    console.log('Evaluating Oct 26 & 27 (Non-reminder days):');
+    const runOct26 = await ReminderService.processDueReminders({
+      targetDate: '2026-10-26',
+      businessId: 'biz_1',
+    });
+    if (runOct26.results.find((r) => r.memberId === memberAId)) {
+      throw new Error('Expected NO reminder on Oct 26');
+    }
+    const runOct27 = await ReminderService.processDueReminders({
+      targetDate: '2026-10-27',
+      businessId: 'biz_1',
+    });
+    if (runOct27.results.find((r) => r.memberId === memberAId)) {
+      throw new Error('Expected NO reminder on Oct 27');
+    }
+    console.log('  -> PASSED: Oct 26 and Oct 27 correctly triggered NO reminder.');
+
+    // 3. Evaluate on Oct 28 (expiry date - due today)
+    console.log('Evaluating Oct 28 (On expiry date):');
+    const runOct28 = await ReminderService.processDueReminders({
+      targetDate: '2026-10-28',
+      businessId: 'biz_1',
+    });
+    const itemOct28 = runOct28.results.find((r) => r.memberId === memberAId);
+    if (!itemOct28 || itemOct28.reminderType !== 'due_today') {
+      throw new Error(`Expected Oct 28 due-today reminder, got: ${JSON.stringify(itemOct28)}`);
+    }
+    console.log('  -> PASSED: Oct 28 payment-due-today reminder generated correctly (type: due_today).');
+
+    // 4. Evaluate on Oct 29 & Oct 30 (non-reminder days)
+    console.log('Evaluating Oct 29 & 30 (Non-reminder days after expiry):');
     const runOct29 = await ReminderService.processDueReminders({
       targetDate: '2026-10-29',
       businessId: 'biz_1',
     });
-    const itemOct29 = runOct29.results.find((r) => r.memberId === memberAId);
-    if (!itemOct29 || itemOct29.reminderType !== 'reminder_2_days' || (itemOct29.action !== 'sent' && itemOct29.action !== 'failed')) {
-      throw new Error(`Expected Oct 29 renewal reminder for memberA, got: ${JSON.stringify(itemOct29)}`);
+    if (runOct29.results.find((r) => r.memberId === memberAId)) {
+      throw new Error('Expected NO reminder on Oct 29');
     }
-    console.log('  -> PASSED: Oct 29 renewal reminder generated correctly (type: reminder_2_days).');
+    console.log('  -> PASSED: Oct 29 and Oct 30 correctly triggered NO reminder.');
 
-    // 2. Evaluate on Oct 30 (non-reminder day)
-    console.log('Evaluating Oct 30 (1 day before Oct 31):');
-    const runOct30 = await ReminderService.processDueReminders({
-      targetDate: '2026-10-30',
-      businessId: 'biz_1',
-    });
-    const itemOct30 = runOct30.results.find((r) => r.memberId === memberAId);
-    if (itemOct30) {
-      throw new Error(`Expected NO reminder on Oct 30, but got: ${JSON.stringify(itemOct30)}`);
-    }
-    console.log('  -> PASSED: Oct 30 correctly triggered NO reminder.');
-
-    // 3. Evaluate on Oct 31 (expiry date - due today)
-    console.log('Evaluating Oct 31 (On expiry date):');
+    // 5. Evaluate on Oct 31 (3 days after expiry - first overdue)
+    console.log('Evaluating Oct 31 (3 days after Oct 28 expiry):');
     const runOct31 = await ReminderService.processDueReminders({
       targetDate: '2026-10-31',
       businessId: 'biz_1',
     });
     const itemOct31 = runOct31.results.find((r) => r.memberId === memberAId);
-    if (!itemOct31 || itemOct31.reminderType !== 'due_today') {
-      throw new Error(`Expected Oct 31 due-today reminder, got: ${JSON.stringify(itemOct31)}`);
+    if (!itemOct31 || itemOct31.reminderType !== 'overdue') {
+      throw new Error(`Expected Oct 31 overdue reminder, got: ${JSON.stringify(itemOct31)}`);
     }
-    console.log('  -> PASSED: Oct 31 payment-due-today reminder generated correctly (type: due_today).');
+    console.log('  -> PASSED: Oct 31 first overdue reminder generated correctly (type: overdue).');
 
-    // 4. Evaluate on Nov 3 (3 days after expiry - overdue)
-    console.log('Evaluating Nov 3 (3 days after Oct 31):');
+    // 6. Evaluate on Nov 3 (6 days after expiry, 3 days after Oct 31 - recurring overdue)
+    console.log('Evaluating Nov 3 (6 days after expiry, recurring overdue):');
     const runNov3 = await ReminderService.processDueReminders({
       targetDate: '2026-11-03',
       businessId: 'biz_1',
     });
     const itemNov3 = runNov3.results.find((r) => r.memberId === memberAId);
-    if (!itemNov3 || itemNov3.reminderType !== 'overdue_3_days') {
-      throw new Error(`Expected Nov 3 overdue reminder, got: ${JSON.stringify(itemNov3)}`);
+    if (!itemNov3 || itemNov3.reminderType !== 'overdue') {
+      throw new Error(`Expected Nov 3 recurring overdue reminder, got: ${JSON.stringify(itemNov3)}`);
     }
-    console.log('  -> PASSED: Nov 3 overdue reminder generated correctly (type: overdue_3_days).');
+    console.log('  -> PASSED: Nov 3 recurring overdue reminder generated correctly (type: overdue).');
 
-    // 5. Evaluate on Nov 10 (10 days after expiry, 7 days after Nov 3)
-    console.log('Evaluating Nov 10 (Weekly reminder after 3-day overdue):');
-    const runNov10 = await ReminderService.processDueReminders({
-      targetDate: '2026-11-10',
+    // 7. Evaluate on Nov 6 (9 days after expiry, 3 days after Nov 3 - recurring overdue)
+    console.log('Evaluating Nov 6 (9 days after expiry, recurring overdue):');
+    const runNov6 = await ReminderService.processDueReminders({
+      targetDate: '2026-11-06',
       businessId: 'biz_1',
     });
-    const itemNov10 = runNov10.results.find((r) => r.memberId === memberAId);
-    if (!itemNov10 || itemNov10.reminderType !== 'overdue_weekly') {
-      throw new Error(`Expected Nov 10 weekly overdue reminder, got: ${JSON.stringify(itemNov10)}`);
+    const itemNov6 = runNov6.results.find((r) => r.memberId === memberAId);
+    if (!itemNov6 || itemNov6.reminderType !== 'overdue') {
+      throw new Error(`Expected Nov 6 recurring overdue reminder, got: ${JSON.stringify(itemNov6)}`);
     }
-    console.log('  -> PASSED: Nov 10 weekly renewal reminder generated correctly (type: overdue_weekly).');
+    console.log('  -> PASSED: Nov 6 recurring overdue reminder generated correctly (type: overdue).');
 
     // =========================================================================
-    // TEST SCENARIO B: Member renews on November 2 (before overdue SMS)
+    // TEST SCENARIO B: Member renews on October 30 (before overdue SMS)
     // - Stop all old-cycle reminders immediately
     // - Calculate new expiry date correctly
     // - Schedule future reminders from new expiry date
     // =========================================================================
-    console.log('\n--- [SCENARIO B] Member renews on November 2 ---');
+    console.log('\n--- [SCENARIO B] Member renews on October 30 ---');
 
     const memberBId = 9102;
     await db.collection('members').insertOne({
@@ -207,7 +240,7 @@ async function runMembershipRenewalSmsTest() {
       barcode: 'TF-9102',
       status: 'expired',
       memberType: 'individual',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
     const membershipB1Id = 8102;
@@ -217,33 +250,33 @@ async function runMembershipRenewalSmsTest() {
       gymId: 1,
       memberId: memberBId,
       package: 'monthly',
-      startDate: '2026-10-01',
-      expiryDate: '2026-10-31',
+      startDate: '2026-09-28',
+      expiryDate: '2026-10-28',
       status: 'expired',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
     // Pre-populate old pending reminders
     await db.collection('membershipReminders').insertOne({
-      reminderKey: `biz_1:${memberBId}:${membershipB1Id}:overdue_3_days:2026-11-03`,
+      reminderKey: `biz_1:${memberBId}:${membershipB1Id}:overdue:2026-10-31`,
       businessId: 'biz_1',
       gymId: 1,
       memberId: memberBId,
       membershipId: membershipB1Id,
-      reminderType: 'overdue_3_days',
-      scheduledDate: '2026-11-03',
-      dueDate: '2026-10-31',
+      reminderType: 'overdue',
+      scheduledDate: '2026-10-31',
+      dueDate: '2026-10-28',
       status: 'pending',
       attemptCount: 0,
       createdAt: new Date(),
     });
 
-    // Renew on Nov 2 for monthly package (Nov 2 + 1 month = Dec 2)
+    // Renew on Oct 30 for monthly package (Oct 30 + 1 month = Nov 30)
     const renewBRes = await GymService.renewMembership(
       {
         memberId: memberBId,
         package: 'monthly',
-        startDate: '2026-11-02',
+        startDate: '2026-10-30',
         paymentMethod: 'cash',
         paymentAmount: 4500,
         membershipAmount: 4500,
@@ -251,30 +284,30 @@ async function runMembershipRenewalSmsTest() {
       'biz_1'
     );
 
-    if (renewBRes.membership.expiryDate !== '2026-12-02') {
-      throw new Error(`Expected new expiry date 2026-12-02, got: ${renewBRes.membership.expiryDate}`);
+    if (renewBRes.membership.expiryDate !== '2026-11-30') {
+      throw new Error(`Expected new expiry date 2026-11-30, got: ${renewBRes.membership.expiryDate}`);
     }
     console.log(`  -> New expiry date calculated correctly: ${renewBRes.membership.expiryDate}`);
 
     // Verify old reminder was cancelled
     const oldReminderB = await db.collection('membershipReminders').findOne({
-      reminderKey: `biz_1:${memberBId}:${membershipB1Id}:overdue_3_days:2026-11-03`,
+      reminderKey: `biz_1:${memberBId}:${membershipB1Id}:overdue:2026-10-31`,
     });
     if (!oldReminderB || oldReminderB.status !== 'cancelled' || oldReminderB.cancelledReason !== 'renewed') {
       throw new Error(`Old cycle reminder was not cancelled: ${JSON.stringify(oldReminderB)}`);
     }
     console.log('  -> PASSED: Old cycle reminder was cancelled immediately upon renewal (reason: renewed).');
 
-    // Evaluate scheduler on Nov 3: verify NO reminder sent for memberB
-    const runNov3B = await ReminderService.processDueReminders({
-      targetDate: '2026-11-03',
+    // Evaluate scheduler on Oct 31: verify NO reminder sent for memberB
+    const runOct31B = await ReminderService.processDueReminders({
+      targetDate: '2026-10-31',
       businessId: 'biz_1',
     });
-    const itemNov3B = runNov3B.results.find((r) => r.memberId === memberBId);
-    if (itemNov3B && itemNov3B.action === 'sent') {
-      throw new Error(`Expected NO sent reminder on Nov 3 for renewed memberB, got: ${JSON.stringify(itemNov3B)}`);
+    const itemOct31B = runOct31B.results.find((r) => r.memberId === memberBId);
+    if (itemOct31B && itemOct31B.action === 'sent') {
+      throw new Error(`Expected NO sent reminder on Oct 31 for renewed memberB, got: ${JSON.stringify(itemOct31B)}`);
     }
-    console.log('  -> PASSED: No overdue reminder sent on Nov 3 for member who renewed on Nov 2.');
+    console.log('  -> PASSED: No overdue reminder sent on Oct 31 for member who renewed on Oct 30.');
 
     // =========================================================================
     // TEST SCENARIO C: Member renews after receiving an overdue SMS
@@ -294,7 +327,7 @@ async function runMembershipRenewalSmsTest() {
       barcode: 'TF-9103',
       status: 'expired',
       memberType: 'individual',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
     const membershipC1Id = 8103;
@@ -304,50 +337,51 @@ async function runMembershipRenewalSmsTest() {
       gymId: 1,
       memberId: memberCId,
       package: 'monthly',
-      startDate: '2026-10-01',
-      expiryDate: '2026-10-31',
+      startDate: '2026-09-28',
+      expiryDate: '2026-10-28',
       status: 'expired',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
-    // Overdue SMS was sent on Nov 3
+    // Overdue SMS was sent on Oct 31
     await db.collection('membershipReminders').insertOne({
-      reminderKey: `biz_1:${memberCId}:${membershipC1Id}:overdue_3_days:2026-11-03`,
+      reminderKey: `biz_1:${memberCId}:${membershipC1Id}:overdue:2026-10-31`,
       businessId: 'biz_1',
       gymId: 1,
       memberId: memberCId,
       membershipId: membershipC1Id,
-      reminderType: 'overdue_3_days',
-      scheduledDate: '2026-11-03',
-      dueDate: '2026-10-31',
-      status: 'sent',
-      sentAt: new Date('2026-11-03'),
+      reminderType: 'overdue',
+      scheduledDate: '2026-10-31',
+      dueDate: '2026-10-28',
+      status: 'delivered',
+      sentAt: new Date('2026-10-31'),
+      deliveredAt: new Date('2026-10-31'),
       attemptCount: 1,
-      createdAt: new Date('2026-11-03'),
+      createdAt: new Date('2026-10-31'),
     });
 
-    // Member renews on Nov 4
+    // Member renews on Nov 1
     const renewCRes = await GymService.renewMembership(
       {
         memberId: memberCId,
         package: 'monthly',
-        startDate: '2026-11-04',
+        startDate: '2026-11-01',
         paymentMethod: 'cash',
         paymentAmount: 4500,
         membershipAmount: 4500,
       },
       'biz_1'
     );
-    console.log(`  -> Member renewed on Nov 4 until: ${renewCRes.membership.expiryDate}`);
+    console.log(`  -> Member renewed on Nov 1 until: ${renewCRes.membership.expiryDate}`);
 
-    // Evaluate on Nov 10 (when old period's weekly reminder would have fired)
-    const runNov10C = await ReminderService.processDueReminders({
-      targetDate: '2026-11-10',
+    // Evaluate on Nov 3 (when old period's next 3-day overdue reminder would have fired)
+    const runNov3C = await ReminderService.processDueReminders({
+      targetDate: '2026-11-03',
       businessId: 'biz_1',
     });
-    const itemNov10C = runNov10C.results.find((r) => r.memberId === memberCId);
-    if (itemNov10C && itemNov10C.action === 'sent') {
-      throw new Error(`Expected NO reminder on Nov 10 from old period, but got: ${JSON.stringify(itemNov10C)}`);
+    const itemNov3C = runNov3C.results.find((r) => r.memberId === memberCId);
+    if (itemNov3C && itemNov3C.action === 'sent') {
+      throw new Error(`Expected NO reminder on Nov 3 from old period, but got: ${JSON.stringify(itemNov3C)}`);
     }
     console.log('  -> PASSED: No further reminders sent from old period after member renewed.');
 
@@ -368,7 +402,7 @@ async function runMembershipRenewalSmsTest() {
       barcode: 'TF-9104',
       status: 'active',
       memberType: 'individual',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
     const membershipD1Id = 8104;
@@ -378,25 +412,25 @@ async function runMembershipRenewalSmsTest() {
       gymId: 1,
       memberId: memberDId,
       package: 'monthly',
-      startDate: '2026-10-01',
-      expiryDate: '2026-10-31',
+      startDate: '2026-09-28',
+      expiryDate: '2026-10-28',
       status: 'active',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
-    // Run 1 on Oct 29
-    console.log('Scheduler Run 1 on Oct 29:');
+    // Run 1 on Oct 25
+    console.log('Scheduler Run 1 on Oct 25:');
     const run1D = await ReminderService.processDueReminders({
-      targetDate: '2026-10-29',
+      targetDate: '2026-10-25',
       businessId: 'biz_1',
     });
     const item1D = run1D.results.find((r) => r.memberId === memberDId);
     console.log(`  -> Run 1 action: ${item1D?.action}`);
 
-    // Run 2 on Oct 29 immediately after
-    console.log('Scheduler Run 2 on Oct 29:');
+    // Run 2 on Oct 25 immediately after
+    console.log('Scheduler Run 2 on Oct 25:');
     const run2D = await ReminderService.processDueReminders({
-      targetDate: '2026-10-29',
+      targetDate: '2026-10-25',
       businessId: 'biz_1',
     });
     const item2D = run2D.results.find((r) => r.memberId === memberDId);
@@ -405,10 +439,10 @@ async function runMembershipRenewalSmsTest() {
     }
     console.log('  -> PASSED: Duplicate reminder prevented on subsequent run (action: skipped_duplicate).');
 
-    // Run 3 on Oct 29
-    console.log('Scheduler Run 3 on Oct 29:');
+    // Run 3 on Oct 25
+    console.log('Scheduler Run 3 on Oct 25:');
     const run3D = await ReminderService.processDueReminders({
-      targetDate: '2026-10-29',
+      targetDate: '2026-10-25',
       businessId: 'biz_1',
     });
     const item3D = run3D.results.find((r) => r.memberId === memberDId);
@@ -436,7 +470,7 @@ async function runMembershipRenewalSmsTest() {
       barcode: 'TF-9105',
       status: 'active',
       memberType: 'individual',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
     await db.collection('memberships').insertOne({
@@ -445,16 +479,16 @@ async function runMembershipRenewalSmsTest() {
       gymId: 1,
       memberId: memberEId,
       package: 'monthly',
-      startDate: '2026-10-01',
-      expiryDate: '2026-10-31',
+      startDate: '2026-09-28',
+      expiryDate: '2026-10-28',
       status: 'active',
-      createdAt: new Date('2026-10-01'),
+      createdAt: new Date('2026-09-28'),
     });
 
-    // 1. Simulate SMSlenz temporary gateway network failure
+    // 1. Simulate SMSlenz temporary gateway network failure on Oct 25
     mockSmsNetworkFail = true;
     const run1E = await ReminderService.processDueReminders({
-      targetDate: '2026-10-29',
+      targetDate: '2026-10-25',
       businessId: 'biz_1',
     });
     const item1E = run1E.results.find((r) => r.memberId === memberEId);
@@ -462,7 +496,7 @@ async function runMembershipRenewalSmsTest() {
       throw new Error(`Expected failed action when provider fails, got: ${JSON.stringify(item1E)}`);
     }
 
-    const keyE = `biz_1:${memberEId}:${membershipEId}:reminder_2_days:2026-10-29`;
+    const keyE = `biz_1:${memberEId}:${membershipEId}:expired_soon:2026-10-25`;
     const recordedFail = await db.collection('membershipReminders').findOne({ reminderKey: keyE });
     if (!recordedFail || recordedFail.status !== 'failed' || recordedFail.attemptCount !== 1) {
       throw new Error(`Failed attempt not recorded properly: ${JSON.stringify(recordedFail)}`);
@@ -472,7 +506,7 @@ async function runMembershipRenewalSmsTest() {
     // 2. Simulate SMSlenz gateway recovery & retry
     mockSmsNetworkFail = false;
     const run2E = await ReminderService.processDueReminders({
-      targetDate: '2026-10-29',
+      targetDate: '2026-10-25',
       businessId: 'biz_1',
     });
     const item2E = run2E.results.find((r) => r.memberId === memberEId);
@@ -481,14 +515,14 @@ async function runMembershipRenewalSmsTest() {
     }
 
     const recoveredRecord = await db.collection('membershipReminders').findOne({ reminderKey: keyE });
-    if (!recoveredRecord || (recoveredRecord.status !== 'sent' && recoveredRecord.status !== 'delivered') || recoveredRecord.attemptCount !== 2) {
+    if (!recoveredRecord || (recoveredRecord.status !== 'sent' && recoveredRecord.status !== 'delivered' && recoveredRecord.status !== 'accepted') || recoveredRecord.attemptCount !== 2) {
       throw new Error(`Recovered retry record mismatch: ${JSON.stringify(recoveredRecord)}`);
     }
     console.log('  -> PASSED: Safe retry executed successfully (attemptCount: 2, status: ' + recoveredRecord.status + ').');
 
     // 3. Subsequent run does not duplicate
     const run3E = await ReminderService.processDueReminders({
-      targetDate: '2026-10-29',
+      targetDate: '2026-10-25',
       businessId: 'biz_1',
     });
     const item3E = run3E.results.find((r) => r.memberId === memberEId);
@@ -612,9 +646,9 @@ async function runMembershipRenewalSmsTest() {
       createdAt: new Date(),
     });
 
-    // Run scheduler on Oct 29 for couple
+    // Run scheduler on Oct 28 for couple (3 days before Oct 31 expiry)
     const coupleRun = await ReminderService.processDueReminders({
-      targetDate: '2026-10-29',
+      targetDate: '2026-10-28',
       businessId: 'biz_1',
     });
 

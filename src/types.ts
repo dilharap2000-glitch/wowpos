@@ -337,8 +337,27 @@ export interface UserSession {
   token?: string;
 }
 
-export type ReminderType = 'reminder_2_days' | 'due_today' | 'overdue_3_days' | 'overdue_weekly';
-export type ReminderStatus = 'pending' | 'processing' | 'sent' | 'delivered' | 'failed' | 'cancelled' | 'invalidated';
+export type ReminderType =
+  | 'expired_soon'
+  | 'due_today'
+  | 'overdue'
+  | 'reminder_2_days'
+  | 'reminder_3_days'
+  | 'overdue_3_days'
+  | 'overdue_weekly';
+export type ReminderStatus = 'pending' | 'processing' | 'accepted' | 'sent' | 'delivered' | 'failed' | 'cancelled' | 'invalidated';
+
+export interface ReminderStats {
+  expiredSoon: number;
+  dueToday: number;
+  overdue: number;
+  pending: number;
+  accepted: number;
+  delivered: number;
+  failed: number;
+  cancelled: number;
+  total: number;
+}
 
 export interface MembershipReminder {
   id: number;
