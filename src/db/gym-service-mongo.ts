@@ -1680,6 +1680,25 @@ export class GymService {
       console.warn('Non-blocking welcome SMS dispatch notice:', smsErr?.message || smsErr);
     }
 
+    // Schedule automated renewal reminders for new membership period
+    try {
+      await ReminderService.scheduleRemindersForPeriod({
+        businessId,
+        gymId,
+        memberId,
+        memberName: data.fullName,
+        memberPhone: data.phone,
+        memberType: isCouple ? 'couple' : 'individual',
+        partnerMemberNumber: data.partnerMemberNumber || null,
+        membershipId: newMembershipDoc.id,
+        packageType: data.package,
+        startDate: data.startDate,
+        expiryDate,
+      });
+    } catch (remErr: any) {
+      console.warn('Initial reminder scheduling notice:', remErr?.message || remErr);
+    }
+
     const fullMember = await this.getMemberById(memberId, businessId);
     return {
       ...(fullMember || newMemberDoc),
@@ -1812,7 +1831,11 @@ export class GymService {
       throw new Error(`Member #${data.memberId} not found`);
     }
 
-    const start = parseDateStr(data.startDate);
+    const currentExpiry = member.latestMembership?.expiryDate || null;
+    const isCurrentlyActive = currentExpiry ? currentExpiry >= data.startDate : false;
+    const baseStartDate = isCurrentlyActive && currentExpiry ? currentExpiry : data.startDate;
+
+    const start = parseDateStr(baseStartDate);
     const exp = new Date(start);
     if (data.package === 'monthly') {
       exp.setMonth(exp.getMonth() + 1);
@@ -2010,6 +2033,26 @@ export class GymService {
       });
     } catch (smsErr: any) {
       console.warn('Non-blocking renewal SMS dispatch notice:', smsErr?.message || smsErr);
+    }
+
+    // CRITICAL RENEWAL RESET: Invalidate old reminder cycle & schedule future reminders based only on new expiry date
+    try {
+      await ReminderService.onMembershipRenewed({
+        businessId,
+        gymId,
+        memberId: data.memberId,
+        memberName: member.fullName,
+        memberPhone: member.phone,
+        memberType: isCouple ? 'couple' : 'individual',
+        partnerMemberNumber: member.partnerMemberNumber || null,
+        oldMembershipId: member.latestMembership?.id || null,
+        newMembershipId: membershipDoc.id,
+        newStartDate: data.startDate,
+        newExpiryDate: expiryDate,
+        packageType: data.package,
+      });
+    } catch (remErr: any) {
+      console.warn('Reminder cycle reset notice:', remErr?.message || remErr);
     }
 
     const updatedMember = await this.getMemberById(data.memberId, businessId);

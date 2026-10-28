@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import { GymService, resolveBusinessId, resolveGymId, ensureMongoSeeded } from '../db/gym-service-mongo.ts';
 import { checkMongoHealth, getMongoDb } from '../db/mongodb.ts';
 import { sendSms, getSmsLogs, checkAccountStatus } from '../lib/sms/smslen.ts';
+import { ReminderService } from '../lib/sms/reminder-service.ts';
 import {
   requireAuth,
   requireGymTenant,
@@ -828,6 +829,121 @@ app.post('/api/sms/account-status', requireAuth, requireGymTenant, async (req: A
   } catch (err: any) {
     console.error('Error checking SMS account status:', err);
     res.status(500).json({ error: err.message || 'Failed to check account status' });
+  }
+});
+
+// =========================================================================
+// MEMBERSHIP RENEWAL SMS AUTOMATION & PERSISTENT CRON ENDPOINTS
+// =========================================================================
+
+const CRON_SECRET = process.env.CRON_SECRET || 'wowpos_colombo_cron_secret_2026';
+
+/**
+ * Scheduled job endpoint compatible with Vercel Cron Jobs and standalone runners.
+ * Protected with server-side authentication or secure cron secret.
+ */
+app.all('/api/cron/membership-reminders', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const querySecret = (req.query.secret as string) || '';
+    const headerSecret = (req.headers['x-cron-secret'] as string) || '';
+    const isVercelCron = Boolean(req.headers['x-vercel-cron']);
+
+    const isSecretAuthorized =
+      (bearerToken && bearerToken === CRON_SECRET) ||
+      (querySecret && querySecret === CRON_SECRET) ||
+      (headerSecret && headerSecret === CRON_SECRET) ||
+      (isVercelCron && (bearerToken === CRON_SECRET || !process.env.CRON_SECRET));
+
+    let isUserAuthorized = false;
+    let authUserBusinessId: string | undefined = undefined;
+
+    // Check if called with an active user session token
+    if (!isSecretAuthorized && bearerToken) {
+      try {
+        const jwt = await import('jsonwebtoken');
+        const jwtSecret = process.env.JWT_SECRET || 'gym_saas_secure_jwt_secret_key_2026';
+        const decoded = jwt.default.verify(bearerToken, jwtSecret) as any;
+        if (decoded && (decoded.role === 'SUPER_ADMIN' || decoded.role === 'GYM_OWNER' || decoded.role === 'STAFF')) {
+          isUserAuthorized = true;
+          authUserBusinessId = decoded.businessId;
+        }
+      } catch {
+        // Not a valid user JWT
+      }
+    }
+
+    if (!isSecretAuthorized && !isUserAuthorized) {
+      return res.status(401).json({
+        error: 'Unauthorized. A valid cron secret or authenticated session is required.',
+      });
+    }
+
+    const targetDate = (req.query.date as string) || (req.body?.date as string) || undefined;
+    const businessId = (req.query.businessId as string) || (req.body?.businessId as string) || authUserBusinessId;
+
+    const result = await ReminderService.processDueReminders({
+      targetDate,
+      businessId,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error running membership reminders cron:', err);
+    res.status(500).json({ error: err.message || 'Failed to execute reminders scheduled job' });
+  }
+});
+
+/**
+ * Tenant-scoped reminders log & audit
+ */
+app.get('/api/reminders/logs', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const status = req.query.status as string | undefined;
+    const memberId = req.query.memberId ? Number(req.query.memberId) : undefined;
+
+    const logs = await ReminderService.getReminders(businessId, { limit, status, memberId });
+    res.json(logs);
+  } catch (err: any) {
+    console.error('Error fetching reminder logs:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch reminder logs' });
+  }
+});
+
+/**
+ * Tenant-scoped reminders statistics
+ */
+app.get('/api/reminders/stats', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const stats = await ReminderService.getReminderStats(businessId);
+    res.json(stats);
+  } catch (err: any) {
+    console.error('Error fetching reminder stats:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch reminder stats' });
+  }
+});
+
+/**
+ * Tenant-scoped manual reminder cycle trigger
+ */
+app.post('/api/reminders/process', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const targetDate = req.body?.date as string | undefined;
+
+    const result = await ReminderService.processDueReminders({
+      businessId,
+      targetDate,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error processing tenant reminders:', err);
+    res.status(500).json({ error: err.message || 'Failed to process reminders' });
   }
 });
 

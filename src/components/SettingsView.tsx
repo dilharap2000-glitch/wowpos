@@ -33,6 +33,7 @@ import {
   Lock,
   CreditCard,
   Percent,
+  Clock,
 } from 'lucide-react';
 import { api } from '../lib/api.ts';
 import { SmsLog } from '../types.ts';
@@ -107,6 +108,14 @@ export const SettingsView: React.FC = () => {
   const [checkingAccount, setCheckingAccount] = useState(false);
   const [accountStatusResult, setAccountStatusResult] = useState<any>(null);
 
+  // Automated Membership Renewal SMS State
+  const [runningReminders, setRunningReminders] = useState(false);
+  const [remindersRunResult, setRemindersRunResult] = useState<any>(null);
+  const [reminderStats, setReminderStats] = useState<any>(null);
+  const [smsLogsView, setSmsLogsView] = useState<'reminders' | 'dispatches'>('reminders');
+  const [reminderLogs, setReminderLogs] = useState<any[]>([]);
+  const [loadingReminderLogs, setLoadingReminderLogs] = useState<boolean>(false);
+
   // New Staff Modal
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [staffUsername, setStaffUsername] = useState('');
@@ -174,6 +183,7 @@ export const SettingsView: React.FC = () => {
     loadSmsLogs();
     loadStaff();
     loadProfile();
+    loadReminderStats();
   }, []);
 
   const loadProfile = async () => {
@@ -250,6 +260,43 @@ export const SettingsView: React.FC = () => {
       setStaffList(list || []);
     } catch (err) {
       console.error('Failed to load staff list:', err);
+    }
+  };
+
+  const loadReminderLogs = async () => {
+    setLoadingReminderLogs(true);
+    try {
+      const list = await api.getReminderLogs({ limit: 100 });
+      setReminderLogs(list || []);
+    } catch (err) {
+      console.warn('Could not load reminder logs:', err);
+    } finally {
+      setLoadingReminderLogs(false);
+    }
+  };
+
+  const loadReminderStats = async () => {
+    try {
+      const stats = await api.getReminderStats();
+      setReminderStats(stats);
+      await loadReminderLogs();
+    } catch (err) {
+      console.warn('Could not load reminder stats:', err);
+    }
+  };
+
+  const handleTriggerReminders = async () => {
+    setRunningReminders(true);
+    setRemindersRunResult(null);
+    try {
+      const res = await api.processTenantReminders();
+      setRemindersRunResult(res);
+      await loadReminderStats();
+      await loadSmsLogs();
+    } catch (err: any) {
+      setRemindersRunResult({ error: err.message || 'Failed to trigger automated reminders' });
+    } finally {
+      setRunningReminders(false);
     }
   };
 
@@ -2086,6 +2133,92 @@ export const SettingsView: React.FC = () => {
                 Each gym tenant maintains isolated gateway credentials. The Sender ID <strong className="text-white">ZENERGY GYM</strong> is registered and verified with Sri Lankan telecom operators via SMSlenz.
               </p>
             </div>
+
+            {/* Automated Renewal SMS Engine Card */}
+            <div className="p-5 bg-black/60 border border-white/10 rounded-3xl space-y-4 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-black text-white uppercase tracking-wider text-sm">
+                  <Clock className="w-4 h-4 text-[#FACC15]" />
+                  Renewal SMS Automation
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 text-emerald-400 font-bold uppercase">
+                  Active (Asia/Colombo)
+                </span>
+              </div>
+
+              <div className="space-y-1.5 text-gray-300 text-[11px] leading-relaxed bg-white/5 p-3 rounded-2xl border border-white/5">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
+                  <span><strong>2 Days Before:</strong> Renewal reminder SMS</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
+                  <span><strong>Expiry Date:</strong> Payment-due-today SMS</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
+                  <span><strong>3 Days After:</strong> Overdue renewal SMS</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FACC15]" />
+                  <span><strong>Every 7 Days:</strong> Weekly reminders until renewal</span>
+                </div>
+                <div className="flex items-center gap-2 text-emerald-400 font-semibold pt-1 border-t border-white/10">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Cycle auto-resets on renewal (cancels all old cycle reminders)</span>
+                </div>
+              </div>
+
+              {reminderStats && (
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Pending</span>
+                    <span className="text-xs font-bold text-white">{reminderStats.pending || 0}</span>
+                  </div>
+                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Sent</span>
+                    <span className="text-xs font-bold text-emerald-400">{reminderStats.sent || 0}</span>
+                  </div>
+                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Failed</span>
+                    <span className="text-xs font-bold text-red-400">{reminderStats.failed || 0}</span>
+                  </div>
+                  <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                    <span className="text-[9px] text-gray-400 uppercase block font-bold">Reset/Cancelled</span>
+                    <span className="text-xs font-bold text-gray-400">{reminderStats.cancelled || 0}</span>
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleTriggerReminders}
+                disabled={runningReminders || !smsActive}
+                className={`w-full py-2.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+                  runningReminders || !smsActive
+                    ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                    : 'bg-white/10 hover:bg-white/20 text-white border border-white/10 active:scale-95'
+                }`}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${runningReminders ? 'animate-spin' : ''}`} />
+                {runningReminders ? 'Evaluating Reminders...' : 'RUN REMINDER CHECK NOW'}
+              </button>
+
+              {remindersRunResult && (
+                <div className="p-3 rounded-xl bg-black/60 border border-white/10 text-[11px] space-y-1">
+                  {remindersRunResult.error ? (
+                    <span className="text-red-400 font-bold block">{remindersRunResult.error}</span>
+                  ) : (
+                    <div className="text-gray-300">
+                      <span className="text-emerald-400 font-bold block mb-1">Reminder check complete:</span>
+                      <div>Sent: <strong className="text-white">{remindersRunResult.sent}</strong></div>
+                      <div>Skipped duplicates: <strong className="text-white">{remindersRunResult.skippedDuplicates}</strong></div>
+                      <div>Skipped renewed: <strong className="text-white">{remindersRunResult.skippedRenewed}</strong></div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2095,87 +2228,201 @@ export const SettingsView: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'sms_logs' && (
         <div className="bg-[#121212] border border-white/10 rounded-3xl overflow-hidden">
-          <div className="p-5 border-b border-white/10 flex items-center justify-between">
+          <div className="p-5 border-b border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-base font-black text-white uppercase tracking-wider">
-                SMS Delivery Audit Logs
+              <h2 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-5 h-5 text-[#FACC15]" />
+                SMS & Renewal Reminder Audits
               </h2>
               <p className="text-xs text-gray-400">
-                Audit trail of notifications dispatched to gym athletes and staff via SMSlenz.
+                View automated renewal reminder cycles and gateway dispatch logs.
               </p>
             </div>
-            <button
-              onClick={loadSmsLogs}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-black/60 p-1 rounded-xl border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setSmsLogsView('reminders')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    smsLogsView === 'reminders'
+                      ? 'bg-[#FACC15] text-black shadow-sm'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Renewal Cycles ({reminderLogs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSmsLogsView('dispatches')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    smsLogsView === 'dispatches'
+                      ? 'bg-[#FACC15] text-black shadow-sm'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Gateway Dispatches ({smsLogs.length})
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  loadSmsLogs();
+                  loadReminderLogs();
+                }}
+                disabled={loadingReminderLogs}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                title="Refresh logs"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingReminderLogs ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-gray-300">
-              <thead className="bg-black/40 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-white/10">
-                <tr>
-                  <th className="p-4">Sent At</th>
-                  <th className="p-4">Recipient</th>
-                  <th className="p-4">Sender ID</th>
-                  <th className="p-4">Type</th>
-                  <th className="p-4">Message Content</th>
-                  <th className="p-4">Gateway Status</th>
-                  <th className="p-4">Campaign ID</th>
-                  <th className="p-4">Diagnostics</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {smsLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="p-4 text-xs text-gray-400 whitespace-nowrap">
-                      {log.sentAt || log.createdAt ? new Date(log.sentAt || log.createdAt!).toLocaleString() : 'Just now'}
-                    </td>
-                    <td className="p-4 font-mono text-xs text-white whitespace-nowrap">
-                      {log.phone}
-                    </td>
-                    <td className="p-4 font-mono text-xs text-gray-300 whitespace-nowrap">
-                      {log.senderId || 'ZENERGY GYM'}
-                    </td>
-                    <td className="p-4 text-xs font-bold text-[#FACC15] uppercase whitespace-nowrap">
-                      {log.messageType}
-                    </td>
-                    <td className="p-4 text-xs text-gray-300 max-w-xs truncate">
-                      {log.message}
-                    </td>
-                    <td className="p-4 whitespace-nowrap">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                          log.status === 'delivered'
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
-                            : log.status === 'accepted' || log.status === 'sent'
-                            ? 'bg-blue-950 text-blue-400 border border-blue-800/50'
-                            : 'bg-red-950 text-red-400 border border-red-800/50'
-                        }`}
-                      >
-                        {log.status === 'accepted' ? 'Accepted / Queued' : log.status}
-                      </span>
-                    </td>
-                    <td className="p-4 font-mono text-xs text-[#FACC15]">
-                      {log.campaignId || '—'}
-                    </td>
-                    <td className="p-4 text-[11px] font-mono text-gray-400 max-w-xs truncate">
-                      {log.errorMessage || log.providerStatus || log.apiResponse || 'OK'}
-                    </td>
-                  </tr>
-                ))}
-
-                {smsLogs.length === 0 && (
+          {smsLogsView === 'reminders' ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-gray-300">
+                <thead className="bg-black/40 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-white/10">
                   <tr>
-                    <td colSpan={8} className="p-12 text-center text-gray-500 text-xs uppercase font-mono">
-                      No SMS logs recorded yet.
-                    </td>
+                    <th className="p-4">Scheduled Date</th>
+                    <th className="p-4">Member</th>
+                    <th className="p-4">Plan</th>
+                    <th className="p-4">Expiry (Due Date)</th>
+                    <th className="p-4">Reminder Type</th>
+                    <th className="p-4">Cycle Status</th>
+                    <th className="p-4">Attempts</th>
+                    <th className="p-4">Diagnostics / Notes</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-white/5 font-sans">
+                  {reminderLogs.map((item) => (
+                    <tr key={item.id || item.reminderKey} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="p-4 text-xs font-mono text-gray-300 whitespace-nowrap">
+                        {item.scheduledDate}
+                      </td>
+                      <td className="p-4 whitespace-nowrap">
+                        <div className="font-bold text-white text-xs">{item.memberName}</div>
+                        <div className="font-mono text-[10px] text-gray-500">{item.memberPhone}</div>
+                      </td>
+                      <td className="p-4 text-xs uppercase font-mono text-gray-300 whitespace-nowrap">
+                        {item.package || 'monthly'}
+                      </td>
+                      <td className="p-4 font-mono text-xs text-[#FACC15] whitespace-nowrap">
+                        {item.dueDate || item.membershipExpiryDate}
+                      </td>
+                      <td className="p-4 text-xs whitespace-nowrap">
+                        <span className="font-bold text-gray-200 uppercase text-[11px]">
+                          {item.reminderType === 'reminder_2_days'
+                            ? '⏳ 2 Days Before Expiry'
+                            : item.reminderType === 'due_today'
+                            ? '🟠 Due Today'
+                            : item.reminderType === 'overdue_3_days'
+                            ? '🔴 3 Days Overdue'
+                            : '🔁 Weekly Overdue Reminder'}
+                        </span>
+                      </td>
+                      <td className="p-4 whitespace-nowrap">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                            item.status === 'delivered' || item.status === 'sent'
+                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                              : item.status === 'pending'
+                              ? 'bg-yellow-950 text-yellow-400 border border-yellow-800/50'
+                              : item.status === 'cancelled' || item.status === 'invalidated'
+                              ? 'bg-gray-800 text-gray-400 border border-gray-700/50'
+                              : 'bg-red-950 text-red-400 border border-red-800/50'
+                          }`}
+                        >
+                          {item.status === 'cancelled' ? 'Reset (Renewed)' : item.status}
+                        </span>
+                      </td>
+                      <td className="p-4 font-mono text-xs text-center text-gray-400">
+                        {item.attemptCount || 0}
+                      </td>
+                      <td className="p-4 text-[11px] font-mono text-gray-400 max-w-xs truncate">
+                        {item.cancelledReason === 'renewed'
+                          ? 'Old cycle cancelled upon renewal'
+                          : item.errorMessage || item.campaignId ? `Campaign: ${item.campaignId}` : item.providerResponse || 'Scheduled'}
+                      </td>
+                    </tr>
+                  ))}
+
+                  {reminderLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-gray-500 text-xs uppercase font-mono">
+                        No renewal reminder cycles recorded yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-gray-300">
+                <thead className="bg-black/40 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-white/10">
+                  <tr>
+                    <th className="p-4">Sent At</th>
+                    <th className="p-4">Recipient</th>
+                    <th className="p-4">Sender ID</th>
+                    <th className="p-4">Type</th>
+                    <th className="p-4">Message Content</th>
+                    <th className="p-4">Gateway Status</th>
+                    <th className="p-4">Campaign ID</th>
+                    <th className="p-4">Diagnostics</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {smsLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="p-4 text-xs text-gray-400 whitespace-nowrap">
+                        {log.sentAt || log.createdAt ? new Date(log.sentAt || log.createdAt!).toLocaleString() : 'Just now'}
+                      </td>
+                      <td className="p-4 font-mono text-xs text-white whitespace-nowrap">
+                        {log.phone}
+                      </td>
+                      <td className="p-4 font-mono text-xs text-gray-300 whitespace-nowrap">
+                        {log.senderId || 'ZENERGY GYM'}
+                      </td>
+                      <td className="p-4 text-xs font-bold text-[#FACC15] uppercase whitespace-nowrap">
+                        {log.messageType}
+                      </td>
+                      <td className="p-4 text-xs text-gray-300 max-w-xs truncate">
+                        {log.message}
+                      </td>
+                      <td className="p-4 whitespace-nowrap">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                            log.status === 'delivered'
+                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                              : log.status === 'accepted' || log.status === 'sent'
+                              ? 'bg-blue-950 text-blue-400 border border-blue-800/50'
+                              : 'bg-red-950 text-red-400 border border-red-800/50'
+                          }`}
+                        >
+                          {log.status === 'accepted' ? 'Accepted / Queued' : log.status}
+                        </span>
+                      </td>
+                      <td className="p-4 font-mono text-xs text-[#FACC15]">
+                        {log.campaignId || '-'}
+                      </td>
+                      <td className="p-4 text-[11px] font-mono text-gray-400 max-w-xs truncate">
+                        {log.errorMessage || log.providerStatus || log.apiResponse || 'OK'}
+                      </td>
+                    </tr>
+                  ))}
+
+                  {smsLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-gray-500 text-xs uppercase font-mono">
+                        No SMS logs recorded yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

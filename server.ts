@@ -30,6 +30,25 @@ async function startServer() {
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Gym SaaS Server running on http://0.0.0.0:${PORT}`);
     });
+
+    // Persistent in-server scheduler for standalone Node.js environments
+    import('./src/lib/sms/reminder-service.ts').then(({ ReminderService }) => {
+      ReminderService.setupIndexes().catch((err) => console.warn('Reminder indexes setup warning:', err));
+      
+      // Initial reminder check 15 seconds after startup
+      setTimeout(() => {
+        ReminderService.processDueReminders().catch((err) => {
+          console.warn('Scheduled reminder startup run notice:', err?.message || err);
+        });
+      }, 15000);
+
+      // Hourly persistent check
+      setInterval(() => {
+        ReminderService.processDueReminders().catch((err) => {
+          console.warn('Scheduled reminder periodic run notice:', err?.message || err);
+        });
+      }, 60 * 60 * 1000);
+    }).catch((e) => console.warn('Reminder service scheduler load note:', e));
   }
 }
 

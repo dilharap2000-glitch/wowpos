@@ -315,10 +315,35 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // Cron
+  // Cron & Reminders
   triggerDailyCron: () =>
     request<any>('/api/cron/notifications', {
       method: 'POST',
+    }),
+
+  triggerCronReminders: (params?: { date?: string; secret?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.date) q.set('date', params.date);
+    if (params?.secret) q.set('secret', params.secret);
+    return request<any>(`/api/cron/membership-reminders?${q.toString()}`, {
+      method: 'POST',
+    });
+  },
+
+  getReminderLogs: (params?: { limit?: number; status?: string; memberId?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set('limit', String(params.limit));
+    if (params?.status) q.set('status', params.status);
+    if (params?.memberId) q.set('memberId', String(params.memberId));
+    return request<any[]>(`/api/reminders/logs?${q.toString()}`);
+  },
+
+  getReminderStats: () => request<any>('/api/reminders/stats'),
+
+  processTenantReminders: (data?: { date?: string }) =>
+    request<any>('/api/reminders/process', {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
     }),
 
   // Super Admin

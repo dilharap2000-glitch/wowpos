@@ -113,6 +113,11 @@ async function setupMongoIndexes(db) {
     await db.collection("saleItems").createIndex({ businessId: 1, saleId: 1 });
     await db.collection("saleItems").createIndex({ businessId: 1, productId: 1 });
     await db.collection("settings").createIndex({ businessId: 1, key: 1 });
+    await db.collection("membershipReminders").createIndex({ reminderKey: 1 }, { unique: true });
+    await db.collection("membershipReminders").createIndex({ businessId: 1, memberId: 1 });
+    await db.collection("membershipReminders").createIndex({ businessId: 1, status: 1 });
+    await db.collection("membershipReminders").createIndex({ businessId: 1, membershipId: 1 });
+    await db.collection("membershipReminders").createIndex({ scheduledDate: 1, status: 1 });
     console.log("MongoDB indexes ensured successfully.");
   } catch (err) {
     console.warn("Index creation warning:", err);
@@ -547,6 +552,672 @@ async function saveSmsLog(logEntry) {
     memorySmsLogs.push(logEntry);
   }
 }
+
+// src/lib/date-utils.ts
+var COLOMBO_TIMEZONE = "Asia/Colombo";
+function sanitizeDateString(dateStr) {
+  if (!dateStr) return "";
+  let str = String(dateStr).trim();
+  if (str.startsWith("2826")) {
+    str = str.replace(/^2826/, "2026");
+  }
+  const parts = str.split(/[-/]/);
+  if (parts.length === 3) {
+    let y = Number(parts[0]);
+    if (y === 2826 || y >= 2800 && y <= 2899) {
+      y -= 800;
+    } else if (y > 2050 && y < 2900 && String(y).endsWith("26")) {
+      y = 2026;
+    }
+    const m = String(parts[1]).padStart(2, "0");
+    const d = String(parts[2]).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return str;
+}
+function addDaysToDateStr(dateStr, days) {
+  if (!dateStr) return "";
+  const sanitized = sanitizeDateString(dateStr);
+  const parts = sanitized.split("-").map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return dateStr;
+  let [y, m, d] = parts;
+  if (y === 2826 || y >= 2800 && y <= 2899) y -= 800;
+  const dateObj = new Date(y, m - 1, d, 12, 0, 0);
+  dateObj.setDate(dateObj.getDate() + days);
+  let resY = dateObj.getFullYear();
+  if (resY === 2826 || resY >= 2800 && resY <= 2899) resY -= 800;
+  const resM = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const resD = String(dateObj.getDate()).padStart(2, "0");
+  return `${resY}-${resM}-${resD}`;
+}
+function getColomboToday() {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: COLOMBO_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    return sanitizeDateString(formatter.format(/* @__PURE__ */ new Date()));
+  } catch (e) {
+    const d = /* @__PURE__ */ new Date();
+    let year = d.getFullYear();
+    if (year === 2826 || year >= 2800 && year <= 2899) year -= 800;
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+}
+function getDaysRemaining(expiryDateStr, todayStr) {
+  const today = sanitizeDateString(todayStr || getColomboToday());
+  const expiry = sanitizeDateString(expiryDateStr);
+  const [y1, m1, d1] = today.split("-").map(Number);
+  const [y2, m2, d2] = expiry.split("-").map(Number);
+  const tDate = new Date(y1, m1 - 1, d1, 12, 0, 0).getTime();
+  const eDate = new Date(y2, m2 - 1, d2, 12, 0, 0).getTime();
+  const diffMs = eDate - tDate;
+  return Math.round(diffMs / (1e3 * 60 * 60 * 24));
+}
+
+// src/lib/sms/reminder-service.ts
+var memoryMembershipReminders = [];
+var ReminderService = class {
+  static {
+    this.MAX_RETRIES = 3;
+  }
+  /**
+   * Generates a deterministic, unique reminder key containing:
+   * tenant (businessId), member (memberId), membership period (membershipId),
+   * reminder type (reminderType), and due/scheduled date.
+   */
+  static buildReminderKey(businessId, memberId, membershipId, reminderType, scheduledDate) {
+    return `${businessId}:${memberId}:${membershipId}:${reminderType}:${scheduledDate}`;
+  }
+  /**
+   * Setup MongoDB indexes for membershipReminders collection
+   */
+  static async setupIndexes() {
+    try {
+      const db = await getMongoDb();
+      if (!db) return;
+      await db.collection("membershipReminders").createIndex({ reminderKey: 1 }, { unique: true });
+      await db.collection("membershipReminders").createIndex({ businessId: 1, memberId: 1 });
+      await db.collection("membershipReminders").createIndex({ businessId: 1, status: 1 });
+      await db.collection("membershipReminders").createIndex({ businessId: 1, membershipId: 1 });
+      await db.collection("membershipReminders").createIndex({ scheduledDate: 1, status: 1 });
+    } catch (err) {
+      console.warn("Reminder index creation notice:", err?.message || err);
+    }
+  }
+  /**
+   * Reset reminder cycle when a membership is renewed:
+   * 1. Invalidate/cancel all pending and failed reminders from the old membership period(s).
+   * 2. Prevent any overdue or weekly reminders from previous cycles from being sent.
+   * 3. Pre-schedule future reminders based ONLY on the new expiry date:
+   *    - 2 days before new expiry (renewal reminder)
+   *    - On new expiry date (due today reminder)
+   *    - 3 days after new expiry (overdue reminder)
+   * 4. For Couple memberships, reset the cycle for both partners without duplicating.
+   */
+  static async onMembershipRenewed(params) {
+    const {
+      businessId,
+      gymId,
+      memberId,
+      memberName,
+      memberPhone,
+      memberType = "individual",
+      partnerMemberNumber,
+      newMembershipId,
+      newStartDate,
+      newExpiryDate,
+      packageType
+    } = params;
+    const db = await getMongoDb();
+    const isCouple = memberType === "couple";
+    const affectedMemberIds = [memberId];
+    if (isCouple && partnerMemberNumber) {
+      try {
+        if (db) {
+          const partnerDoc = await db.collection("members").findOne({
+            businessId,
+            memberNumber: partnerMemberNumber
+          });
+          if (partnerDoc && partnerDoc.id) {
+            affectedMemberIds.push(partnerDoc.id);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not locate partner for reminder reset:", e);
+      }
+    }
+    let cancelledCount = 0;
+    if (db) {
+      const cancelRes = await db.collection("membershipReminders").updateMany(
+        {
+          businessId,
+          memberId: { $in: affectedMemberIds },
+          membershipId: { $ne: newMembershipId },
+          status: { $in: ["pending", "processing", "failed"] }
+        },
+        {
+          $set: {
+            status: "cancelled",
+            cancelledReason: "renewed",
+            invalidatedAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          }
+        }
+      );
+      cancelledCount = cancelRes.modifiedCount || 0;
+    } else {
+      for (const r of memoryMembershipReminders) {
+        if (r.businessId === businessId && affectedMemberIds.includes(r.memberId) && r.membershipId !== newMembershipId && (r.status === "pending" || r.status === "processing" || r.status === "failed")) {
+          r.status = "cancelled";
+          r.cancelledReason = "renewed";
+          r.updatedAt = /* @__PURE__ */ new Date();
+          cancelledCount++;
+        }
+      }
+    }
+    const scheduledCount = await this.scheduleRemindersForPeriod({
+      businessId,
+      gymId,
+      memberId,
+      memberName,
+      memberPhone,
+      memberType,
+      partnerMemberNumber,
+      membershipId: newMembershipId,
+      packageType,
+      startDate: newStartDate,
+      expiryDate: newExpiryDate
+    });
+    return { cancelledCount, scheduledCount };
+  }
+  /**
+   * Pre-schedules standard reminder records for a newly created or renewed membership period:
+   * - 2 days before expiry (renewal reminder)
+   * - On expiry date (due today reminder)
+   * - 3 days after expiry (overdue reminder)
+   */
+  static async scheduleRemindersForPeriod(params) {
+    const {
+      businessId,
+      gymId,
+      memberId,
+      memberName,
+      memberPhone,
+      memberType = "individual",
+      partnerMemberNumber,
+      membershipId,
+      packageType,
+      startDate,
+      expiryDate
+    } = params;
+    const db = await getMongoDb();
+    const remindersToCreate = [
+      {
+        type: "reminder_2_days",
+        scheduledDate: addDaysToDateStr(expiryDate, -2)
+      },
+      {
+        type: "due_today",
+        scheduledDate: expiryDate
+      },
+      {
+        type: "overdue_3_days",
+        scheduledDate: addDaysToDateStr(expiryDate, 3)
+      }
+    ];
+    let createdCount = 0;
+    for (const item of remindersToCreate) {
+      const key = this.buildReminderKey(businessId, memberId, membershipId, item.type, item.scheduledDate);
+      const reminderDoc = {
+        id: Date.now() + Math.floor(Math.random() * 1e3),
+        reminderKey: key,
+        businessId,
+        gymId,
+        memberId,
+        memberName,
+        memberPhone,
+        memberType,
+        partnerMemberNumber: partnerMemberNumber || null,
+        membershipId,
+        package: packageType,
+        membershipStartDate: startDate,
+        membershipExpiryDate: expiryDate,
+        reminderType: item.type,
+        scheduledDate: item.scheduledDate,
+        dueDate: expiryDate,
+        status: "pending",
+        attemptCount: 0,
+        createdAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      if (db) {
+        try {
+          const res = await db.collection("membershipReminders").updateOne(
+            { reminderKey: key },
+            { $setOnInsert: reminderDoc },
+            { upsert: true }
+          );
+          if (res.upsertedCount > 0) createdCount++;
+        } catch (e) {
+        }
+      } else {
+        const existingIdx = memoryMembershipReminders.findIndex((r) => r.reminderKey === key);
+        if (existingIdx === -1) {
+          memoryMembershipReminders.push(reminderDoc);
+          createdCount++;
+        }
+      }
+    }
+    return createdCount;
+  }
+  /**
+   * Main scheduler execution engine:
+   * Evaluates all active memberships for the target date (defaulting to Asia/Colombo today).
+   * Safe against concurrent executions, idempotent, and completely isolates tenants.
+   */
+  static async processDueReminders(options = {}) {
+    const targetDate = options.targetDate || getColomboToday();
+    const maxRetries = options.maxRetries || this.MAX_RETRIES;
+    const db = await getMongoDb();
+    const results = [];
+    let processed = 0;
+    let sent = 0;
+    let failed = 0;
+    let skippedDuplicates = 0;
+    let skippedRenewed = 0;
+    let businesses = [];
+    if (db) {
+      const query = { status: "active" };
+      if (options.businessId) {
+        query.businessId = options.businessId;
+      }
+      businesses = await db.collection("businesses").find(query).toArray();
+    } else {
+      businesses = [{ id: 1, businessId: options.businessId || "biz_1", gymName: "ZENERGY FITNESS" }];
+    }
+    for (const biz of businesses) {
+      const businessId = biz.businessId || `biz_${biz.id}`;
+      const gymId = biz.id || 1;
+      let members = [];
+      if (db) {
+        members = await db.collection("members").find({
+          businessId,
+          status: { $ne: "archived" },
+          archivedAt: null
+        }).toArray();
+      }
+      const processedCouplesInRun = /* @__PURE__ */ new Set();
+      for (const member of members) {
+        processed++;
+        let latestMembership = null;
+        if (db) {
+          latestMembership = await db.collection("memberships").find({ businessId, memberId: member.id }).sort({ expiryDate: -1, createdAt: -1, id: -1 }).limit(1).next();
+        }
+        if (!latestMembership || !latestMembership.expiryDate) {
+          continue;
+        }
+        const isCouple = (member.memberType || latestMembership.memberType) === "couple";
+        if (isCouple && member.partnerMemberNumber) {
+          const coupleKey = [member.memberNumber, member.partnerMemberNumber].sort().join(":");
+          if (processedCouplesInRun.has(coupleKey)) {
+            results.push({
+              reminderKey: `couple_skipped_${member.id}`,
+              memberId: member.id,
+              memberName: member.fullName,
+              phone: member.phone,
+              reminderType: "due_today",
+              scheduledDate: targetDate,
+              dueDate: latestMembership.expiryDate,
+              action: "skipped_partner"
+            });
+            continue;
+          }
+        }
+        const expiryDate = latestMembership.expiryDate;
+        const daysRemaining = getDaysRemaining(expiryDate, targetDate);
+        let activeReminderType = null;
+        if (daysRemaining === 2) {
+          activeReminderType = "reminder_2_days";
+        } else if (daysRemaining === 0) {
+          activeReminderType = "due_today";
+        } else if (daysRemaining === -3) {
+          activeReminderType = "overdue_3_days";
+        } else if (daysRemaining <= -10 && (-daysRemaining - 3) % 7 === 0) {
+          activeReminderType = "overdue_weekly";
+        }
+        if (!activeReminderType) {
+          continue;
+        }
+        const reminderKey = this.buildReminderKey(
+          businessId,
+          member.id,
+          latestMembership.id,
+          activeReminderType,
+          targetDate
+        );
+        let existingReminder = null;
+        if (db) {
+          existingReminder = await db.collection("membershipReminders").findOne({ reminderKey });
+        } else {
+          existingReminder = memoryMembershipReminders.find((r) => r.reminderKey === reminderKey);
+        }
+        if (existingReminder) {
+          if (existingReminder.status === "sent" || existingReminder.status === "delivered") {
+            skippedDuplicates++;
+            results.push({
+              reminderKey,
+              memberId: member.id,
+              memberName: member.fullName,
+              phone: member.phone,
+              reminderType: activeReminderType,
+              scheduledDate: targetDate,
+              dueDate: expiryDate,
+              action: "skipped_duplicate"
+            });
+            continue;
+          }
+          if (existingReminder.status === "cancelled" || existingReminder.status === "invalidated") {
+            skippedRenewed++;
+            results.push({
+              reminderKey,
+              memberId: member.id,
+              memberName: member.fullName,
+              phone: member.phone,
+              reminderType: activeReminderType,
+              scheduledDate: targetDate,
+              dueDate: expiryDate,
+              action: "skipped_renewed"
+            });
+            continue;
+          }
+          if (existingReminder.status === "processing" && existingReminder.lockUntil && new Date(existingReminder.lockUntil).getTime() > Date.now()) {
+            continue;
+          }
+          if (existingReminder.status === "failed" && (existingReminder.attemptCount || 0) >= maxRetries) {
+            continue;
+          }
+        }
+        let newestCheck = null;
+        if (db) {
+          newestCheck = await db.collection("memberships").findOne(
+            { businessId, memberId: member.id, expiryDate: { $gt: expiryDate } }
+          );
+        }
+        if (newestCheck) {
+          if (db) {
+            await db.collection("membershipReminders").updateOne(
+              { reminderKey },
+              {
+                $set: {
+                  status: "cancelled",
+                  cancelledReason: "renewed",
+                  updatedAt: /* @__PURE__ */ new Date()
+                }
+              },
+              { upsert: true }
+            );
+          }
+          skippedRenewed++;
+          results.push({
+            reminderKey,
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone,
+            reminderType: activeReminderType,
+            scheduledDate: targetDate,
+            dueDate: expiryDate,
+            action: "skipped_renewed"
+          });
+          continue;
+        }
+        const lockUntil = new Date(Date.now() + 6e4);
+        const reminderBaseDoc = {
+          id: existingReminder?.id || Date.now() + Math.floor(Math.random() * 1e3),
+          reminderKey,
+          businessId,
+          gymId,
+          memberId: member.id,
+          memberName: member.fullName,
+          memberPhone: member.phone,
+          memberType: isCouple ? "couple" : "individual",
+          partnerMemberNumber: member.partnerMemberNumber || null,
+          membershipId: latestMembership.id,
+          package: latestMembership.package || "monthly",
+          membershipStartDate: latestMembership.startDate || targetDate,
+          membershipExpiryDate: expiryDate,
+          reminderType: activeReminderType,
+          scheduledDate: targetDate,
+          dueDate: expiryDate,
+          status: "processing",
+          attemptCount: (existingReminder?.attemptCount || 0) + 1,
+          lastAttemptAt: /* @__PURE__ */ new Date(),
+          createdAt: existingReminder?.createdAt || /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        if (db) {
+          await db.collection("membershipReminders").updateOne(
+            { reminderKey },
+            {
+              $set: {
+                status: "processing",
+                lockUntil,
+                lastAttemptAt: /* @__PURE__ */ new Date(),
+                updatedAt: /* @__PURE__ */ new Date()
+              },
+              $inc: { attemptCount: 1 },
+              $setOnInsert: {
+                id: reminderBaseDoc.id,
+                businessId,
+                gymId,
+                memberId: member.id,
+                memberName: member.fullName,
+                memberPhone: member.phone,
+                memberType: isCouple ? "couple" : "individual",
+                partnerMemberNumber: member.partnerMemberNumber || null,
+                membershipId: latestMembership.id,
+                package: latestMembership.package || "monthly",
+                membershipStartDate: latestMembership.startDate || targetDate,
+                membershipExpiryDate: expiryDate,
+                reminderType: activeReminderType,
+                scheduledDate: targetDate,
+                dueDate: expiryDate,
+                createdAt: /* @__PURE__ */ new Date()
+              }
+            },
+            { upsert: true }
+          );
+        } else {
+          const idx = memoryMembershipReminders.findIndex((r) => r.reminderKey === reminderKey);
+          if (idx !== -1) {
+            memoryMembershipReminders[idx].status = "processing";
+            memoryMembershipReminders[idx].attemptCount = (memoryMembershipReminders[idx].attemptCount || 0) + 1;
+            memoryMembershipReminders[idx].lastAttemptAt = /* @__PURE__ */ new Date();
+          } else {
+            memoryMembershipReminders.push(reminderBaseDoc);
+          }
+        }
+        const gymName = biz.gymName || "ZENERGY FITNESS";
+        const cleanPkg = (latestMembership.package || "monthly").replace(/_/g, " ").toUpperCase();
+        const couplePrefix = isCouple ? "COUPLE " : "";
+        let smsMessage = "";
+        let providerMsgType = "expiring_soon";
+        if (activeReminderType === "reminder_2_days") {
+          providerMsgType = "expiring_soon";
+          smsMessage = `Reminder: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} will expire in 2 days on ${expiryDate}. Please renew to continue seamless access.`;
+        } else if (activeReminderType === "due_today") {
+          providerMsgType = "due_today";
+          smsMessage = `Payment Due Today: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} expires today (${expiryDate}). Please renew today to maintain your membership.`;
+        } else if (activeReminderType === "overdue_3_days") {
+          providerMsgType = "expired";
+          smsMessage = `Overdue Notice: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} expired on ${expiryDate} and is now overdue. Please renew today to reactivate access.`;
+        } else {
+          providerMsgType = "expired";
+          smsMessage = `Renewal Reminder: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} remains expired since ${expiryDate}. Please contact us or visit reception to renew.`;
+        }
+        try {
+          const sendRes = await sendSms({
+            gymId,
+            businessId,
+            memberId: member.id,
+            phone: member.phone,
+            messageType: providerMsgType,
+            message: smsMessage
+          });
+          const finalStatus = sendRes.success ? sendRes.status === "delivered" ? "delivered" : "sent" : "failed";
+          if (db) {
+            await db.collection("membershipReminders").updateOne(
+              { reminderKey },
+              {
+                $set: {
+                  status: finalStatus,
+                  httpStatus: sendRes.httpStatus,
+                  campaignId: sendRes.campaignId ? String(sendRes.campaignId) : null,
+                  providerResponse: sendRes.apiResponse || sendRes.apiStatus,
+                  errorMessage: sendRes.error || null,
+                  sentAt: sendRes.success ? /* @__PURE__ */ new Date() : void 0,
+                  deliveredAt: sendRes.status === "delivered" ? /* @__PURE__ */ new Date() : void 0,
+                  lockUntil: null,
+                  updatedAt: /* @__PURE__ */ new Date()
+                }
+              }
+            );
+          } else {
+            const idx = memoryMembershipReminders.findIndex((r) => r.reminderKey === reminderKey);
+            if (idx !== -1) {
+              memoryMembershipReminders[idx].status = finalStatus;
+              memoryMembershipReminders[idx].httpStatus = sendRes.httpStatus;
+              memoryMembershipReminders[idx].campaignId = sendRes.campaignId ? String(sendRes.campaignId) : null;
+              memoryMembershipReminders[idx].errorMessage = sendRes.error || null;
+              if (sendRes.success) memoryMembershipReminders[idx].sentAt = /* @__PURE__ */ new Date();
+              memoryMembershipReminders[idx].updatedAt = /* @__PURE__ */ new Date();
+            }
+          }
+          if (sendRes.success) {
+            sent++;
+            results.push({
+              reminderKey,
+              memberId: member.id,
+              memberName: member.fullName,
+              phone: member.phone,
+              reminderType: activeReminderType,
+              scheduledDate: targetDate,
+              dueDate: expiryDate,
+              action: "sent",
+              campaignId: sendRes.campaignId ? String(sendRes.campaignId) : null
+            });
+            if (isCouple && member.partnerMemberNumber) {
+              const coupleKey = [member.memberNumber, member.partnerMemberNumber].sort().join(":");
+              processedCouplesInRun.add(coupleKey);
+            }
+          } else {
+            failed++;
+            results.push({
+              reminderKey,
+              memberId: member.id,
+              memberName: member.fullName,
+              phone: member.phone,
+              reminderType: activeReminderType,
+              scheduledDate: targetDate,
+              dueDate: expiryDate,
+              action: "failed",
+              error: sendRes.error || "Provider rejected request"
+            });
+          }
+        } catch (smsErr) {
+          failed++;
+          const errText = smsErr.message || "SMS dispatch exception";
+          if (db) {
+            await db.collection("membershipReminders").updateOne(
+              { reminderKey },
+              {
+                $set: {
+                  status: "failed",
+                  errorMessage: errText,
+                  lockUntil: null,
+                  updatedAt: /* @__PURE__ */ new Date()
+                }
+              }
+            );
+          } else {
+            const idx = memoryMembershipReminders.findIndex((r) => r.reminderKey === reminderKey);
+            if (idx !== -1) {
+              memoryMembershipReminders[idx].status = "failed";
+              memoryMembershipReminders[idx].errorMessage = errText;
+            }
+          }
+          results.push({
+            reminderKey,
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone,
+            reminderType: activeReminderType,
+            scheduledDate: targetDate,
+            dueDate: expiryDate,
+            action: "failed",
+            error: errText
+          });
+        }
+      }
+    }
+    return {
+      success: true,
+      date: targetDate,
+      timezone: "Asia/Colombo",
+      processed,
+      sent,
+      failed,
+      skippedDuplicates,
+      skippedRenewed,
+      results
+    };
+  }
+  /**
+   * Retrieves reminder records for a tenant
+   */
+  static async getReminders(businessId, filter) {
+    const db = await getMongoDb();
+    const limit = filter?.limit || 100;
+    const query = { businessId };
+    if (filter?.status) query.status = filter.status;
+    if (filter?.memberId) query.memberId = filter.memberId;
+    if (db) {
+      return await db.collection("membershipReminders").find(query).sort({ scheduledDate: -1, createdAt: -1 }).limit(limit).toArray();
+    }
+    return memoryMembershipReminders.filter((r) => {
+      if (r.businessId !== businessId) return false;
+      if (filter?.status && r.status !== filter.status) return false;
+      if (filter?.memberId && r.memberId !== filter.memberId) return false;
+      return true;
+    }).slice(-limit).reverse();
+  }
+  /**
+   * Returns summary counts of reminders for a tenant
+   */
+  static async getReminderStats(businessId) {
+    const reminders = await this.getReminders(businessId, { limit: 1e3 });
+    const stats = {
+      pending: 0,
+      sent: 0,
+      delivered: 0,
+      failed: 0,
+      cancelled: 0,
+      total: reminders.length
+    };
+    for (const r of reminders) {
+      if (r.status === "pending") stats.pending++;
+      else if (r.status === "sent") stats.sent++;
+      else if (r.status === "delivered") stats.delivered++;
+      else if (r.status === "failed") stats.failed++;
+      else if (r.status === "cancelled" || r.status === "invalidated") stats.cancelled++;
+    }
+    return stats;
+  }
+};
 
 // src/lib/security.ts
 import crypto from "crypto";
@@ -2113,6 +2784,23 @@ var GymService = class {
     } catch (smsErr) {
       console.warn("Non-blocking welcome SMS dispatch notice:", smsErr?.message || smsErr);
     }
+    try {
+      await ReminderService.scheduleRemindersForPeriod({
+        businessId,
+        gymId,
+        memberId,
+        memberName: data.fullName,
+        memberPhone: data.phone,
+        memberType: isCouple ? "couple" : "individual",
+        partnerMemberNumber: data.partnerMemberNumber || null,
+        membershipId: newMembershipDoc.id,
+        packageType: data.package,
+        startDate: data.startDate,
+        expiryDate
+      });
+    } catch (remErr) {
+      console.warn("Initial reminder scheduling notice:", remErr?.message || remErr);
+    }
     const fullMember = await this.getMemberById(memberId, businessId);
     return {
       ...fullMember || newMemberDoc,
@@ -2199,7 +2887,10 @@ var GymService = class {
     if (!member) {
       throw new Error(`Member #${data.memberId} not found`);
     }
-    const start = parseDateStr(data.startDate);
+    const currentExpiry = member.latestMembership?.expiryDate || null;
+    const isCurrentlyActive = currentExpiry ? currentExpiry >= data.startDate : false;
+    const baseStartDate = isCurrentlyActive && currentExpiry ? currentExpiry : data.startDate;
+    const start = parseDateStr(baseStartDate);
     const exp = new Date(start);
     if (data.package === "monthly") {
       exp.setMonth(exp.getMonth() + 1);
@@ -2381,6 +3072,24 @@ var GymService = class {
       });
     } catch (smsErr) {
       console.warn("Non-blocking renewal SMS dispatch notice:", smsErr?.message || smsErr);
+    }
+    try {
+      await ReminderService.onMembershipRenewed({
+        businessId,
+        gymId,
+        memberId: data.memberId,
+        memberName: member.fullName,
+        memberPhone: member.phone,
+        memberType: isCouple ? "couple" : "individual",
+        partnerMemberNumber: member.partnerMemberNumber || null,
+        oldMembershipId: member.latestMembership?.id || null,
+        newMembershipId: membershipDoc.id,
+        newStartDate: data.startDate,
+        newExpiryDate: expiryDate,
+        packageType: data.package
+      });
+    } catch (remErr) {
+      console.warn("Reminder cycle reset notice:", remErr?.message || remErr);
     }
     const updatedMember = await this.getMemberById(data.memberId, businessId);
     return {
@@ -4597,6 +5306,83 @@ app.post("/api/sms/account-status", requireAuth, requireGymTenant, async (req, r
   } catch (err) {
     console.error("Error checking SMS account status:", err);
     res.status(500).json({ error: err.message || "Failed to check account status" });
+  }
+});
+var CRON_SECRET = process.env.CRON_SECRET || "wowpos_colombo_cron_secret_2026";
+app.all("/api/cron/membership-reminders", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const querySecret = req.query.secret || "";
+    const headerSecret = req.headers["x-cron-secret"] || "";
+    const isVercelCron = Boolean(req.headers["x-vercel-cron"]);
+    const isSecretAuthorized = bearerToken && bearerToken === CRON_SECRET || querySecret && querySecret === CRON_SECRET || headerSecret && headerSecret === CRON_SECRET || isVercelCron && (bearerToken === CRON_SECRET || !process.env.CRON_SECRET);
+    let isUserAuthorized = false;
+    let authUserBusinessId = void 0;
+    if (!isSecretAuthorized && bearerToken) {
+      try {
+        const jwt2 = await import("jsonwebtoken");
+        const jwtSecret = process.env.JWT_SECRET || "gym_saas_secure_jwt_secret_key_2026";
+        const decoded = jwt2.default.verify(bearerToken, jwtSecret);
+        if (decoded && (decoded.role === "SUPER_ADMIN" || decoded.role === "GYM_OWNER" || decoded.role === "STAFF")) {
+          isUserAuthorized = true;
+          authUserBusinessId = decoded.businessId;
+        }
+      } catch {
+      }
+    }
+    if (!isSecretAuthorized && !isUserAuthorized) {
+      return res.status(401).json({
+        error: "Unauthorized. A valid cron secret or authenticated session is required."
+      });
+    }
+    const targetDate = req.query.date || req.body?.date || void 0;
+    const businessId = req.query.businessId || req.body?.businessId || authUserBusinessId;
+    const result = await ReminderService.processDueReminders({
+      targetDate,
+      businessId
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("Error running membership reminders cron:", err);
+    res.status(500).json({ error: err.message || "Failed to execute reminders scheduled job" });
+  }
+});
+app.get("/api/reminders/logs", requireAuth, requireGymTenant, async (req, res) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const status = req.query.status;
+    const memberId = req.query.memberId ? Number(req.query.memberId) : void 0;
+    const logs = await ReminderService.getReminders(businessId, { limit, status, memberId });
+    res.json(logs);
+  } catch (err) {
+    console.error("Error fetching reminder logs:", err);
+    res.status(500).json({ error: err.message || "Failed to fetch reminder logs" });
+  }
+});
+app.get("/api/reminders/stats", requireAuth, requireGymTenant, async (req, res) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const stats = await ReminderService.getReminderStats(businessId);
+    res.json(stats);
+  } catch (err) {
+    console.error("Error fetching reminder stats:", err);
+    res.status(500).json({ error: err.message || "Failed to fetch reminder stats" });
+  }
+});
+app.post("/api/reminders/process", requireAuth, requireGymTenant, async (req, res) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const targetDate = req.body?.date;
+    const result = await ReminderService.processDueReminders({
+      businessId,
+      targetDate
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("Error processing tenant reminders:", err);
+    res.status(500).json({ error: err.message || "Failed to process reminders" });
   }
 });
 app.get("/api/settings", requireAuth, requireGymTenant, async (req, res) => {
