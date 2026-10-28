@@ -947,6 +947,47 @@ app.post('/api/reminders/process', requireAuth, requireGymTenant, async (req: Au
   }
 });
 
+/**
+ * Tenant-scoped preview of expired members and reminder eligibility
+ * (Total expired, Already reminded - will be skipped, Eligible - will be sent, Missing or invalid phone numbers)
+ */
+app.post('/api/reminders/expired/preview', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const targetDate = (req.body?.date as string) || (req.query?.date as string) || undefined;
+
+    const preview = await ReminderService.previewExpiredReminders(businessId, targetDate);
+    res.json(preview);
+  } catch (err: any) {
+    console.error('Error generating expired reminders preview:', err);
+    res.status(500).json({ error: err.message || 'Failed to generate expired reminders preview' });
+  }
+});
+
+/**
+ * Tenant-scoped bulk dispatch of expired membership reminders
+ * with strict deduplication, atomic locks, and post-send stats
+ */
+app.post('/api/reminders/expired/send', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = req.businessId || resolveBusinessId(req.gymId);
+    const gymId = req.gymId || resolveGymId(businessId);
+    const targetDate = req.body?.date as string | undefined;
+    const memberIds = Array.isArray(req.body?.memberIds) ? req.body.memberIds.map(Number) : undefined;
+
+    const result = await ReminderService.sendBulkExpiredReminders(businessId, {
+      gymId,
+      targetDate,
+      memberIds,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error sending bulk expired reminders:', err);
+    res.status(500).json({ error: err.message || 'Failed to dispatch bulk expired reminders' });
+  }
+});
+
 // Settings & Customization
 app.get('/api/settings', requireAuth, requireGymTenant, async (req: AuthRequest, res: Response) => {
   try {

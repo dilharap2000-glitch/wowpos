@@ -1,7 +1,15 @@
 import { getMongoDb } from '../../db/mongodb.ts';
-import { sendSms } from './smslen.ts';
+import { sendSms, isValidSriLankanPhone, normalizeSriLankanPhone } from './smslen.ts';
 import { getColomboToday, addDaysToDateStr, getDaysRemaining } from '../date-utils.ts';
-import type { ReminderType, ReminderStatus, MembershipReminder, ReminderStats } from '../../types.ts';
+import type {
+  ReminderType,
+  ReminderStatus,
+  MembershipReminder,
+  ReminderStats,
+  ExpiredReminderPreviewItem,
+  ExpiredReminderPreviewResult,
+  ExpiredReminderBulkSendResult,
+} from '../../types.ts';
 
 // In-memory fallback storage when running without MongoDB
 const memoryMembershipReminders: MembershipReminder[] = [];
@@ -14,7 +22,14 @@ export interface ReminderProcessResult {
   reminderType: ReminderType;
   scheduledDate: string;
   dueDate: string;
-  action: 'sent' | 'skipped_duplicate' | 'skipped_renewed' | 'skipped_partner' | 'failed';
+  action:
+    | 'sent'
+    | 'skipped_duplicate'
+    | 'skipped_already_sent'
+    | 'skipped_renewed'
+    | 'skipped_partner'
+    | 'invalid_phone'
+    | 'failed';
   error?: string;
   campaignId?: string | null;
 }
@@ -63,6 +78,253 @@ export class ReminderService {
     } catch (err: any) {
       console.warn('Reminder index creation notice:', err?.message || err);
     }
+  }
+
+  /**
+   * Checks both membershipReminders and smsLogs collections to verify whether
+   * a reminder has already been accepted/sent or is currently processing for
+   * a given tenant, member, membership period, reminder type, and scheduled date.
+   */
+  static async checkReminderHistory(params: {
+    businessId: string;
+    memberId: number;
+    membershipId: number;
+    reminderType: ReminderType;
+    scheduledDate: string;
+  }): Promise<{
+    hasSentReminder: boolean;
+    isProcessing: boolean;
+    isCancelled: boolean;
+    status?: string;
+    source?: 'membershipReminders' | 'smsLogs';
+    record?: any;
+  }> {
+    const { businessId, memberId, membershipId, reminderType, scheduledDate } = params;
+    const db = await getMongoDb();
+    const reminderKey = this.buildReminderKey(businessId, memberId, membershipId, reminderType, scheduledDate);
+
+    if (db) {
+      // 1. Check membershipReminders collection
+      const remDoc = await db.collection('membershipReminders').findOne({
+        $or: [
+          { reminderKey },
+          { businessId, memberId, membershipId, reminderType, scheduledDate },
+        ],
+      });
+
+      if (remDoc) {
+        if (['accepted', 'sent', 'delivered'].includes(remDoc.status)) {
+          return {
+            hasSentReminder: true,
+            isProcessing: false,
+            isCancelled: false,
+            status: remDoc.status,
+            source: 'membershipReminders',
+            record: remDoc,
+          };
+        }
+        if (['cancelled', 'invalidated'].includes(remDoc.status)) {
+          return {
+            hasSentReminder: false,
+            isProcessing: false,
+            isCancelled: true,
+            status: remDoc.status,
+            source: 'membershipReminders',
+            record: remDoc,
+          };
+        }
+        if (remDoc.status === 'processing' && remDoc.lockUntil && new Date(remDoc.lockUntil).getTime() > Date.now()) {
+          return {
+            hasSentReminder: false,
+            isProcessing: true,
+            isCancelled: false,
+            status: 'processing',
+            source: 'membershipReminders',
+            record: remDoc,
+          };
+        }
+      }
+
+      // 2. Cross-check smsLogs collection
+      const expectedMsgType =
+        reminderType === 'overdue' || (reminderType as string).startsWith('overdue')
+          ? 'expired'
+          : reminderType === 'due_today'
+          ? 'due_today'
+          : 'expiring_soon';
+
+      const smsLog = await db.collection('smsLogs').findOne({
+        businessId,
+        memberId,
+        messageType: expectedMsgType,
+        status: { $in: ['accepted', 'delivered'] },
+        $or: [
+          { scheduledDate },
+          {
+            createdAt: {
+              $gte: new Date(`${scheduledDate}T00:00:00.000Z`),
+              $lte: new Date(`${scheduledDate}T23:59:59.999Z`),
+            },
+          },
+        ],
+      });
+
+      if (smsLog) {
+        return {
+          hasSentReminder: true,
+          isProcessing: false,
+          isCancelled: false,
+          status: smsLog.status || 'accepted',
+          source: 'smsLogs',
+          record: smsLog,
+        };
+      }
+    } else {
+      // In-memory fallback
+      const remDoc = memoryMembershipReminders.find(
+        (r) =>
+          r.reminderKey === reminderKey ||
+          (r.businessId === businessId &&
+            r.memberId === memberId &&
+            r.membershipId === membershipId &&
+            r.reminderType === reminderType &&
+            r.scheduledDate === scheduledDate)
+      );
+
+      if (remDoc) {
+        if (['accepted', 'sent', 'delivered'].includes(remDoc.status)) {
+          return {
+            hasSentReminder: true,
+            isProcessing: false,
+            isCancelled: false,
+            status: remDoc.status,
+            source: 'membershipReminders',
+            record: remDoc,
+          };
+        }
+        if (['cancelled', 'invalidated'].includes(remDoc.status)) {
+          return {
+            hasSentReminder: false,
+            isProcessing: false,
+            isCancelled: true,
+            status: remDoc.status,
+            source: 'membershipReminders',
+            record: remDoc,
+          };
+        }
+        if (remDoc.status === 'processing') {
+          return {
+            hasSentReminder: false,
+            isProcessing: true,
+            isCancelled: false,
+            status: 'processing',
+            source: 'membershipReminders',
+            record: remDoc,
+          };
+        }
+      }
+    }
+
+    return { hasSentReminder: false, isProcessing: false, isCancelled: false };
+  }
+
+  /**
+   * Specific check for expired members:
+   * Determines if a member has ALREADY received an expired-membership reminder
+   * for their current expired membership period to prevent duplicate sends during manual bulk sends
+   * or scheduled cron runs.
+   */
+  static async hasReceivedExpiredReminder(
+    businessId: string,
+    memberId: number,
+    membershipId: number,
+    scheduledDate?: string
+  ): Promise<{
+    hasReceived: boolean;
+    date?: string;
+    status?: string;
+    source?: 'membershipReminders' | 'smsLogs';
+  }> {
+    const db = await getMongoDb();
+
+    if (db) {
+      // 1. Query membershipReminders
+      const remQuery: any = {
+        businessId,
+        memberId,
+        membershipId,
+        reminderType: { $in: ['overdue', 'expired', 'overdue_3_days', 'overdue_weekly'] },
+        status: { $in: ['accepted', 'sent', 'delivered'] },
+      };
+      if (scheduledDate) {
+        remQuery.scheduledDate = scheduledDate;
+      }
+
+      const existingRem = await db
+        .collection('membershipReminders')
+        .find(remQuery)
+        .sort({ scheduledDate: -1, createdAt: -1 })
+        .limit(1)
+        .next();
+
+      if (existingRem) {
+        return {
+          hasReceived: true,
+          date: existingRem.scheduledDate,
+          status: existingRem.status,
+          source: 'membershipReminders',
+        };
+      }
+
+      // 2. Query smsLogs
+      const logQuery: any = {
+        businessId,
+        memberId,
+        messageType: 'expired',
+        status: { $in: ['accepted', 'delivered'] },
+      };
+
+      const existingLog = await db
+        .collection('smsLogs')
+        .find(logQuery)
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .next();
+
+      if (existingLog) {
+        const logDate = existingLog.createdAt
+          ? new Date(existingLog.createdAt).toISOString().slice(0, 10)
+          : undefined;
+        return {
+          hasReceived: true,
+          date: logDate,
+          status: existingLog.status,
+          source: 'smsLogs',
+        };
+      }
+    } else {
+      // Memory fallback
+      const found = memoryMembershipReminders.find(
+        (r) =>
+          r.businessId === businessId &&
+          r.memberId === memberId &&
+          r.membershipId === membershipId &&
+          ['overdue', 'expired', 'overdue_3_days', 'overdue_weekly'].includes(r.reminderType as any) &&
+          ['accepted', 'sent', 'delivered'].includes(r.status) &&
+          (!scheduledDate || r.scheduledDate === scheduledDate)
+      );
+
+      if (found) {
+        return {
+          hasReceived: true,
+          date: found.scheduledDate,
+          status: found.status,
+          source: 'membershipReminders',
+        };
+      }
+    }
+
+    return { hasReceived: false };
   }
 
   /**
@@ -422,8 +684,91 @@ export class ReminderService {
           targetDate
         );
 
-        // ATOMIC CLAIM & DUPLICATE PREVENTION:
-        // Check if this reminder was already accepted, sent, delivered, or cancelled
+        // 1. Validate Phone Number Format (Sri Lankan Mobile)
+        if (!isValidSriLankanPhone(member.phone)) {
+          results.push({
+            reminderKey,
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone || '',
+            reminderType: activeReminderType,
+            scheduledDate: targetDate,
+            dueDate: expiryDate,
+            action: 'invalid_phone',
+            error: !member.phone ? 'Missing phone number' : 'Invalid Sri Lankan mobile format',
+          });
+          continue;
+        }
+
+        // 2. Comprehensive Reminder History Check (both membershipReminders & smsLogs)
+        const historyCheck = await this.checkReminderHistory({
+          businessId,
+          memberId: member.id,
+          membershipId: latestMembership.id,
+          reminderType: activeReminderType,
+          scheduledDate: targetDate,
+        });
+
+        if (historyCheck.hasSentReminder) {
+          skippedDuplicates++;
+          results.push({
+            reminderKey,
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone,
+            reminderType: activeReminderType,
+            scheduledDate: targetDate,
+            dueDate: expiryDate,
+            action: 'skipped_duplicate',
+          });
+          continue;
+        }
+
+        if (historyCheck.isCancelled) {
+          skippedRenewed++;
+          results.push({
+            reminderKey,
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone,
+            reminderType: activeReminderType,
+            scheduledDate: targetDate,
+            dueDate: expiryDate,
+            action: 'skipped_renewed',
+          });
+          continue;
+        }
+
+        if (historyCheck.isProcessing) {
+          // Concurrently in-flight by another runner
+          continue;
+        }
+
+        // 3. For overdue reminders: check if an expired reminder was already sent for this period/date
+        if (activeReminderType === 'overdue') {
+          const expiredCheck = await this.hasReceivedExpiredReminder(
+            businessId,
+            member.id,
+            latestMembership.id,
+            targetDate
+          );
+          if (expiredCheck.hasReceived) {
+            skippedDuplicates++;
+            results.push({
+              reminderKey,
+              memberId: member.id,
+              memberName: member.fullName,
+              phone: member.phone,
+              reminderType: activeReminderType,
+              scheduledDate: targetDate,
+              dueDate: expiryDate,
+              action: 'skipped_already_sent',
+            });
+            continue;
+          }
+        }
+
+        // 4. ATOMIC CLAIM & DUPLICATE PREVENTION:
         let existingReminder: any = null;
         if (db) {
           existingReminder = await db.collection('membershipReminders').findOne({ reminderKey });
@@ -475,7 +820,7 @@ export class ReminderService {
             continue;
           }
 
-          // Check if retry limit exceeded for failed reminders
+          // Check if retry limit exceeded for failed reminders (allows safe retries under limit)
           if (existingReminder.status === 'failed' && (existingReminder.attemptCount || 0) >= maxRetries) {
             continue;
           }
@@ -812,5 +1157,499 @@ export class ReminderService {
       else if (r.status === 'cancelled' || r.status === 'invalidated') stats.cancelled++;
     }
     return stats;
+  }
+
+  /**
+   * Previews expired membership reminder dispatch for a gym tenant:
+   * Categorizes all expired members into:
+   * 1. Total expired members
+   * 2. Already reminded — will be skipped
+   * 3. Eligible members — SMS will be sent
+   * 4. Missing or invalid phone numbers
+   */
+  static async previewExpiredReminders(
+    businessId: string,
+    targetDateStr?: string
+  ): Promise<ExpiredReminderPreviewResult> {
+    const targetDate = targetDateStr || getColomboToday();
+    const db = await getMongoDb();
+
+    let totalExpired = 0;
+    let alreadyReminded = 0;
+    let eligible = 0;
+    let invalidPhone = 0;
+    const membersList: ExpiredReminderPreviewItem[] = [];
+
+    let members: any[] = [];
+    if (db) {
+      members = await db
+        .collection('members')
+        .find({
+          businessId,
+          status: { $ne: 'archived' },
+          archivedAt: null,
+        })
+        .toArray();
+    }
+
+    for (const member of members) {
+      // Exclude inactive, suspended, or archived members
+      if (
+        member.status === 'inactive' ||
+        member.status === 'suspended' ||
+        member.status === 'archived' ||
+        member.archivedAt
+      ) {
+        continue;
+      }
+
+      // Fetch member's latest membership
+      let latestMembership: any = null;
+      if (db) {
+        latestMembership = await db
+          .collection('memberships')
+          .find({ businessId, memberId: member.id })
+          .sort({ expiryDate: -1, createdAt: -1, id: -1 })
+          .limit(1)
+          .next();
+      }
+
+      if (!latestMembership || !latestMembership.expiryDate) {
+        continue;
+      }
+
+      if (latestMembership.status === 'inactive' || latestMembership.status === 'cancelled') {
+        continue;
+      }
+
+      const expiryDate = latestMembership.expiryDate;
+      const daysRemaining = getDaysRemaining(expiryDate, targetDate);
+
+      // Only expired memberships (expiryDate < targetDate)
+      if (daysRemaining >= 0) {
+        continue;
+      }
+
+      // Check if member already renewed with a newer membership
+      let newerMembership: any = null;
+      if (db) {
+        newerMembership = await db.collection('memberships').findOne({
+          businessId,
+          memberId: member.id,
+          expiryDate: { $gt: expiryDate },
+        });
+      }
+      if (newerMembership) {
+        // Renewed, so no longer expired
+        continue;
+      }
+
+      totalExpired++;
+      const daysOverdue = Math.abs(daysRemaining);
+
+      // Phone validity check
+      const hasValidPhone = isValidSriLankanPhone(member.phone);
+      if (!hasValidPhone) {
+        invalidPhone++;
+        membersList.push({
+          memberId: member.id,
+          memberNumber: member.memberNumber || `M-${member.id}`,
+          fullName: member.fullName,
+          phone: member.phone || '',
+          package: latestMembership.package || 'monthly',
+          expiryDate,
+          daysOverdue,
+          status: 'invalid_phone',
+          reason: !member.phone ? 'Missing phone number' : 'Invalid Sri Lankan mobile format',
+        });
+        continue;
+      }
+
+      // Check if already received expired reminder for this membership period
+      const reminderCheck = await this.hasReceivedExpiredReminder(
+        businessId,
+        member.id,
+        latestMembership.id
+      );
+
+      if (reminderCheck.hasReceived) {
+        alreadyReminded++;
+        membersList.push({
+          memberId: member.id,
+          memberNumber: member.memberNumber || `M-${member.id}`,
+          fullName: member.fullName,
+          phone: member.phone,
+          package: latestMembership.package || 'monthly',
+          expiryDate,
+          daysOverdue,
+          status: 'already_reminded',
+          reason: `Already reminded on ${reminderCheck.date || 'previously'} (${reminderCheck.status || 'accepted'})`,
+          lastReminderDate: reminderCheck.date,
+          lastReminderStatus: reminderCheck.status,
+        });
+      } else {
+        eligible++;
+        membersList.push({
+          memberId: member.id,
+          memberNumber: member.memberNumber || `M-${member.id}`,
+          fullName: member.fullName,
+          phone: member.phone,
+          package: latestMembership.package || 'monthly',
+          expiryDate,
+          daysOverdue,
+          status: 'eligible',
+          reason: 'Eligible for overdue renewal reminder',
+        });
+      }
+    }
+
+    return {
+      totalExpired,
+      alreadyReminded,
+      eligible,
+      invalidPhone,
+      members: membersList,
+    };
+  }
+
+  /**
+   * Bulk sends renewal reminder SMS to eligible expired members for a gym tenant:
+   * - Deduplicates against both membershipReminders and smsLogs
+   * - Skips already reminded members for this period
+   * - Skips invalid phone numbers
+   * - Uses atomic lock to prevent duplicate sends even during concurrent cron or manual execution
+   * - Provides accurate result statistics: sent, skippedAlreadySent, failed, invalidPhone
+   */
+  static async sendBulkExpiredReminders(
+    businessId: string,
+    options: {
+      gymId?: number;
+      targetDate?: string;
+      memberIds?: number[];
+    } = {}
+  ): Promise<ExpiredReminderBulkSendResult> {
+    const targetDate = options.targetDate || getColomboToday();
+    const db = await getMongoDb();
+
+    let totalExpired = 0;
+    let sent = 0;
+    let skippedAlreadySent = 0;
+    let failed = 0;
+    let invalidPhone = 0;
+    let skippedRenewed = 0;
+    let skippedPartner = 0;
+    const results: ExpiredReminderBulkSendResult['results'] = [];
+
+    // Get gym info
+    let gymName = 'ZENERGY FITNESS';
+    let gymId = options.gymId || 1;
+    if (db) {
+      const biz = await db.collection('businesses').findOne({ businessId });
+      if (biz) {
+        if (biz.gymName) gymName = biz.gymName;
+        if (biz.id) gymId = biz.id;
+      }
+    }
+
+    // Fetch members
+    const memberQuery: any = {
+      businessId,
+      status: { $ne: 'archived' },
+      archivedAt: null,
+    };
+    if (options.memberIds && options.memberIds.length > 0) {
+      memberQuery.id = { $in: options.memberIds };
+    }
+
+    let members: any[] = [];
+    if (db) {
+      members = await db.collection('members').find(memberQuery).toArray();
+    }
+
+    const processedCouplesInRun = new Set<string>();
+
+    for (const member of members) {
+      // Skip inactive, suspended, archived
+      if (
+        member.status === 'inactive' ||
+        member.status === 'suspended' ||
+        member.status === 'archived' ||
+        member.archivedAt
+      ) {
+        continue;
+      }
+
+      // Fetch latest membership
+      let latestMembership: any = null;
+      if (db) {
+        latestMembership = await db
+          .collection('memberships')
+          .find({ businessId, memberId: member.id })
+          .sort({ expiryDate: -1, createdAt: -1, id: -1 })
+          .limit(1)
+          .next();
+      }
+
+      if (!latestMembership || !latestMembership.expiryDate) {
+        continue;
+      }
+
+      if (latestMembership.status === 'inactive' || latestMembership.status === 'cancelled') {
+        continue;
+      }
+
+      const expiryDate = latestMembership.expiryDate;
+      const daysRemaining = getDaysRemaining(expiryDate, targetDate);
+
+      // Only expired memberships
+      if (daysRemaining >= 0) {
+        continue;
+      }
+
+      totalExpired++;
+
+      // Check if already renewed with newer expiry
+      let newerMembership: any = null;
+      if (db) {
+        newerMembership = await db.collection('memberships').findOne({
+          businessId,
+          memberId: member.id,
+          expiryDate: { $gt: expiryDate },
+        });
+      }
+      if (newerMembership) {
+        skippedRenewed++;
+        results.push({
+          memberId: member.id,
+          memberName: member.fullName,
+          phone: member.phone,
+          action: 'skipped_renewed',
+        });
+        continue;
+      }
+
+      const isCouple = (member.memberType || latestMembership.memberType) === 'couple';
+
+      // Couple duplicate prevention
+      if (isCouple && member.partnerMemberNumber) {
+        const coupleKey = [member.memberNumber, member.partnerMemberNumber].sort().join(':');
+        if (processedCouplesInRun.has(coupleKey)) {
+          skippedPartner++;
+          results.push({
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone,
+            action: 'skipped_partner',
+          });
+          continue;
+        }
+      }
+
+      // Phone validation
+      if (!isValidSriLankanPhone(member.phone)) {
+        invalidPhone++;
+        results.push({
+          memberId: member.id,
+          memberName: member.fullName,
+          phone: member.phone || '',
+          action: 'invalid_phone',
+          error: !member.phone ? 'Missing phone number' : 'Invalid Sri Lankan mobile format',
+        });
+        continue;
+      }
+
+      // Check if already reminded for this expired membership period
+      const alreadySentCheck = await this.hasReceivedExpiredReminder(
+        businessId,
+        member.id,
+        latestMembership.id
+      );
+
+      if (alreadySentCheck.hasReceived) {
+        skippedAlreadySent++;
+        results.push({
+          memberId: member.id,
+          memberName: member.fullName,
+          phone: member.phone,
+          action: 'skipped_already_sent',
+          status: alreadySentCheck.status,
+        });
+        continue;
+      }
+
+      // ATOMIC CONCURRENCY LOCK:
+      // Build unique deterministic reminder key for this scheduled run
+      const reminderKey = this.buildReminderKey(
+        businessId,
+        member.id,
+        latestMembership.id,
+        'overdue',
+        targetDate
+      );
+
+      const lockUntil = new Date(Date.now() + 60000); // 1-minute lock
+
+      if (db) {
+        // Check if existing record is currently processing or already completed
+        const existing = await db.collection('membershipReminders').findOne({ reminderKey });
+        if (existing) {
+          if (['accepted', 'sent', 'delivered'].includes(existing.status)) {
+            skippedAlreadySent++;
+            results.push({
+              memberId: member.id,
+              memberName: member.fullName,
+              phone: member.phone,
+              action: 'skipped_already_sent',
+              status: existing.status,
+            });
+            continue;
+          }
+          if (
+            existing.status === 'processing' &&
+            existing.lockUntil &&
+            new Date(existing.lockUntil).getTime() > Date.now()
+          ) {
+            // Another thread/cron is currently processing this reminder
+            continue;
+          }
+        }
+
+        // Atomically claim lock
+        await db.collection('membershipReminders').updateOne(
+          { reminderKey },
+          {
+            $set: {
+              status: 'processing',
+              lockUntil,
+              lastAttemptAt: new Date(),
+              updatedAt: new Date(),
+            },
+            $inc: { attemptCount: 1 },
+            $setOnInsert: {
+              id: Date.now() + Math.floor(Math.random() * 1000),
+              businessId,
+              gymId,
+              memberId: member.id,
+              memberName: member.fullName,
+              memberPhone: member.phone,
+              memberType: isCouple ? 'couple' : 'individual',
+              partnerMemberNumber: member.partnerMemberNumber || null,
+              membershipId: latestMembership.id,
+              package: latestMembership.package || 'monthly',
+              membershipStartDate: latestMembership.startDate || targetDate,
+              membershipExpiryDate: expiryDate,
+              reminderType: 'overdue',
+              scheduledDate: targetDate,
+              dueDate: expiryDate,
+              createdAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+      }
+
+      // Construct SMS message
+      const cleanPkg = (latestMembership.package || 'monthly').replace(/_/g, ' ').toUpperCase();
+      const couplePrefix = isCouple ? 'COUPLE ' : '';
+      const smsMessage = `Overdue Notice: Dear ${member.fullName}, your ${couplePrefix}${cleanPkg} membership at ${gymName} expired on ${expiryDate} and is overdue. Please renew and complete payment.`;
+
+      // Dispatch SMS
+      try {
+        const sendRes = await sendSms({
+          gymId,
+          businessId,
+          memberId: member.id,
+          phone: member.phone,
+          messageType: 'expired',
+          message: smsMessage,
+        });
+
+        const finalStatus: ReminderStatus = sendRes.success
+          ? sendRes.status === 'delivered'
+            ? 'delivered'
+            : 'accepted'
+          : 'failed';
+
+        if (db) {
+          await db.collection('membershipReminders').updateOne(
+            { reminderKey },
+            {
+              $set: {
+                status: finalStatus,
+                httpStatus: sendRes.httpStatus,
+                campaignId: sendRes.campaignId ? String(sendRes.campaignId) : null,
+                providerResponse: sendRes.apiResponse || sendRes.apiStatus,
+                errorMessage: sendRes.error || null,
+                sentAt: sendRes.success ? new Date() : undefined,
+                deliveredAt: sendRes.status === 'delivered' ? new Date() : undefined,
+                lockUntil: null,
+                updatedAt: new Date(),
+              },
+            }
+          );
+        }
+
+        if (sendRes.success) {
+          sent++;
+          results.push({
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone,
+            action: 'sent',
+            status: finalStatus,
+            campaignId: sendRes.campaignId ? String(sendRes.campaignId) : null,
+          });
+
+          if (isCouple && member.partnerMemberNumber) {
+            const coupleKey = [member.memberNumber, member.partnerMemberNumber].sort().join(':');
+            processedCouplesInRun.add(coupleKey);
+          }
+        } else {
+          failed++;
+          results.push({
+            memberId: member.id,
+            memberName: member.fullName,
+            phone: member.phone,
+            action: 'failed',
+            error: sendRes.error || 'Gateway rejected request',
+          });
+        }
+      } catch (err: any) {
+        failed++;
+        const errMsg = err?.message || 'SMS dispatch failure';
+        if (db) {
+          await db.collection('membershipReminders').updateOne(
+            { reminderKey },
+            {
+              $set: {
+                status: 'failed',
+                errorMessage: errMsg,
+                lockUntil: null,
+                updatedAt: new Date(),
+              },
+            }
+          );
+        }
+        results.push({
+          memberId: member.id,
+          memberName: member.fullName,
+          phone: member.phone,
+          action: 'failed',
+          error: errMsg,
+        });
+      }
+    }
+
+    return {
+      success: true,
+      totalExpired,
+      sent,
+      skippedAlreadySent,
+      failed,
+      invalidPhone,
+      skippedRenewed,
+      skippedPartner,
+      results,
+    };
   }
 }

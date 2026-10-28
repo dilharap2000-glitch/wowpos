@@ -88,6 +88,16 @@ export function normalizeSriLankanPhone(rawPhone: string): string {
 }
 
 /**
+ * Validates whether a phone number is a valid Sri Lankan mobile number.
+ * Must normalize to +94 followed by 9 digits (+947XXXXXXXX).
+ */
+export function isValidSriLankanPhone(rawPhone?: string | null): boolean {
+  if (!rawPhone) return false;
+  const normalized = normalizeSriLankanPhone(rawPhone);
+  return /^\+94\d{9}$/.test(normalized);
+}
+
+/**
  * Masks a mobile number for safe display and logging without exposing the full phone number:
  * e.g. +94771234567 -> +9477****567
  */

@@ -661,6 +661,191 @@ async function runMembershipRenewalSmsTest() {
     console.log('  -> PASSED: Primary partner processed, partner duplicate avoided (action: ' + (partnerResult?.action || 'skipped') + ').');
 
     // =========================================================================
+    // TEST SCENARIO I: Payment / Renewal BEFORE Expiry (Pre-payment)
+    // - Member renews before the 3-day reminder window
+    // - Never send expired-soon or due-today reminders for the old cycle
+    // =========================================================================
+    console.log('\n--- [SCENARIO I] Payment / Renewal Before Expiry (Pre-payment) ---');
+
+    const memberIId = 9401;
+    await db.collection('members').insertOne({
+      id: memberIId,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9401',
+      fullName: 'Anura Bandara',
+      phone: '+94771239401',
+      barcode: 'TF-9401',
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-09-28'),
+    });
+
+    const membershipI1Id = 8401;
+    await db.collection('memberships').insertOne({
+      id: membershipI1Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: memberIId,
+      package: 'monthly',
+      startDate: '2026-09-28',
+      expiryDate: '2026-10-28',
+      status: 'active',
+      createdAt: new Date('2026-09-28'),
+    });
+
+    // Member pays and renews early on Oct 24 (before the 3-day window on Oct 25)
+    const renewIRes = await GymService.renewMembership(
+      {
+        memberId: memberIId,
+        package: 'monthly',
+        startDate: '2026-10-24',
+        paymentMethod: 'cash',
+        paymentAmount: 4500,
+        membershipAmount: 4500,
+      },
+      'biz_1'
+    );
+    console.log(`  -> Member renewed early on Oct 24 until: ${renewIRes.membership.expiryDate}`);
+
+    // Evaluate on Oct 25 (when old 3-day reminder would have fired)
+    const runOct25I = await ReminderService.processDueReminders({
+      targetDate: '2026-10-25',
+      businessId: 'biz_1',
+    });
+    const itemOct25I = runOct25I.results.find((r) => r.memberId === memberIId);
+    if (itemOct25I && itemOct25I.action === 'sent') {
+      throw new Error(`Expected NO reminder on Oct 25 for early-renewed member, got: ${JSON.stringify(itemOct25I)}`);
+    }
+    console.log('  -> PASSED: No Expired Soon reminder sent on Oct 25 for member who renewed early on Oct 24.');
+
+    // Evaluate on Oct 28 (old expiry date)
+    const runOct28I = await ReminderService.processDueReminders({
+      targetDate: '2026-10-28',
+      businessId: 'biz_1',
+    });
+    const itemOct28I = runOct28I.results.find((r) => r.memberId === memberIId);
+    if (itemOct28I && itemOct28I.action === 'sent') {
+      throw new Error(`Expected NO Due Today reminder on Oct 28 for early-renewed member, got: ${JSON.stringify(itemOct28I)}`);
+    }
+    console.log('  -> PASSED: No Due Today reminder sent on Oct 28 for member who renewed early on Oct 24.');
+
+    // =========================================================================
+    // TEST SCENARIO J: Date & Time Accuracy across Month, Year, and Leap Year Boundaries
+    // =========================================================================
+    console.log('\n--- [SCENARIO J] Date Calculations across Month, Year, and Leap Year Boundaries ---');
+
+    // 1. Month boundary: Oct 31 expiry -> Nov 3 (first overdue), Nov 6 (second overdue)
+    const memberJ1Id = 9501;
+    await db.collection('members').insertOne({
+      id: memberJ1Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9501',
+      fullName: 'Nimal MonthBoundary',
+      phone: '+94771239501',
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-10-01'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8501,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: memberJ1Id,
+      package: 'monthly',
+      startDate: '2026-10-01',
+      expiryDate: '2026-10-31',
+      status: 'active',
+      createdAt: new Date('2026-10-01'),
+    });
+    const runNov3J1 = await ReminderService.processDueReminders({
+      targetDate: '2026-11-03',
+      businessId: 'biz_1',
+    });
+    const itemNov3J1 = runNov3J1.results.find((r) => r.memberId === memberJ1Id);
+    if (!itemNov3J1 || itemNov3J1.reminderType !== 'overdue') {
+      throw new Error(`Expected overdue reminder on Nov 3 for Oct 31 expiry across month boundary, got: ${JSON.stringify(itemNov3J1)}`);
+    }
+    console.log('  -> PASSED: Month boundary (Oct 31 -> Nov 3) overdue reminder calculated correctly.');
+
+    // 2. Year boundary: Dec 31, 2026 expiry -> Jan 3, 2027 (first overdue)
+    const memberJ2Id = 9502;
+    await db.collection('members').insertOne({
+      id: memberJ2Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9502',
+      fullName: 'Sunil YearBoundary',
+      phone: '+94771239502',
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-12-01'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8502,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: memberJ2Id,
+      package: 'monthly',
+      startDate: '2026-12-01',
+      expiryDate: '2026-12-31',
+      status: 'active',
+      createdAt: new Date('2026-12-01'),
+    });
+    const runJan3J2 = await ReminderService.processDueReminders({
+      targetDate: '2027-01-03',
+      businessId: 'biz_1',
+    });
+    const itemJan3J2 = runJan3J2.results.find((r) => r.memberId === memberJ2Id);
+    if (!itemJan3J2 || itemJan3J2.reminderType !== 'overdue') {
+      throw new Error(`Expected overdue reminder on Jan 3, 2027 for Dec 31, 2026 expiry across year boundary, got: ${JSON.stringify(itemJan3J2)}`);
+    }
+    console.log('  -> PASSED: Year boundary (Dec 31, 2026 -> Jan 3, 2027) overdue reminder calculated correctly.');
+
+    // 3. Leap year boundary: Feb 29, 2028 expiry -> Feb 26, 2028 (expired soon), Mar 3, 2028 (first overdue)
+    const memberJ3Id = 9503;
+    await db.collection('members').insertOne({
+      id: memberJ3Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9503',
+      fullName: 'Kasun LeapYear',
+      phone: '+94771239503',
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2028-01-29'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8503,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: memberJ3Id,
+      package: 'monthly',
+      startDate: '2028-01-29',
+      expiryDate: '2028-02-29',
+      status: 'active',
+      createdAt: new Date('2028-01-29'),
+    });
+    const runFeb26J3 = await ReminderService.processDueReminders({
+      targetDate: '2028-02-26',
+      businessId: 'biz_1',
+    });
+    const itemFeb26J3 = runFeb26J3.results.find((r) => r.memberId === memberJ3Id);
+    if (!itemFeb26J3 || itemFeb26J3.reminderType !== 'expired_soon') {
+      throw new Error(`Expected expired_soon on Feb 26, 2028 for leap year Feb 29 expiry, got: ${JSON.stringify(itemFeb26J3)}`);
+    }
+    const runMar3J3 = await ReminderService.processDueReminders({
+      targetDate: '2028-03-03',
+      businessId: 'biz_1',
+    });
+    const itemMar3J3 = runMar3J3.results.find((r) => r.memberId === memberJ3Id);
+    if (!itemMar3J3 || itemMar3J3.reminderType !== 'overdue') {
+      throw new Error(`Expected overdue on Mar 3, 2028 for leap year Feb 29 expiry, got: ${JSON.stringify(itemMar3J3)}`);
+    }
+    console.log('  -> PASSED: Leap year (Feb 29, 2028) 3-day before (Feb 26) and 3-day overdue (Mar 3) calculated accurately.');
+
+    // =========================================================================
     // TEST SCENARIO H: Protected Cron Endpoint Security
     // =========================================================================
     console.log('\n--- [SCENARIO H] Protected Cron Endpoint Security ---');
@@ -686,6 +871,267 @@ async function runMembershipRenewalSmsTest() {
       throw new Error(`Expected HTTP 200 for valid CRON_SECRET, got: ${authCronRes.status} ${JSON.stringify(authCronData)}`);
     }
     console.log('  -> PASSED: Cron endpoint with CRON_SECRET succeeded with HTTP 200 and Asia/Colombo date execution.');
+
+    // =========================================================================
+    // TEST SCENARIO I: Expired Reminder Deduplication, Preview & Safe Bulk Send
+    // =========================================================================
+    console.log('\n--- [SCENARIO I] Expired Reminder Deduplication, Preview & Safe Bulk Send ---');
+
+    // Setup members for Scenario I in biz_1:
+    // 1. Eligible expired member (valid phone, no previous reminder for this period)
+    const expMember1Id = 9601;
+    await db.collection('members').insertOne({
+      id: expMember1Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9601',
+      fullName: 'Sunil Expired Eligible',
+      phone: '+94771239601',
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-08-01'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8601,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: expMember1Id,
+      package: 'monthly',
+      startDate: '2026-08-01',
+      expiryDate: '2026-09-01',
+      status: 'active',
+      createdAt: new Date('2026-08-01'),
+    });
+
+    // 2. Already-reminded expired member (has already accepted overdue reminder in membershipReminders)
+    const expMember2Id = 9602;
+    await db.collection('members').insertOne({
+      id: expMember2Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9602',
+      fullName: 'Nimal Already Reminded',
+      phone: '+94771239602',
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-08-01'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8602,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: expMember2Id,
+      package: 'monthly',
+      startDate: '2026-08-01',
+      expiryDate: '2026-09-01',
+      status: 'active',
+      createdAt: new Date('2026-08-01'),
+    });
+    // Insert existing accepted overdue reminder
+    await db.collection('membershipReminders').insertOne({
+      id: 7602,
+      reminderKey: 'biz_1:9602:8602:overdue:2026-09-04',
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: expMember2Id,
+      memberName: 'Nimal Already Reminded',
+      memberPhone: '+94771239602',
+      membershipId: 8602,
+      reminderType: 'overdue',
+      scheduledDate: '2026-09-04',
+      dueDate: '2026-09-01',
+      status: 'accepted',
+      attemptCount: 1,
+      createdAt: new Date('2026-09-04'),
+    });
+
+    // 3. Invalid/missing phone expired member
+    const expMember3Id = 9603;
+    await db.collection('members').insertOne({
+      id: expMember3Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9603',
+      fullName: 'Anura Invalid Phone',
+      phone: '12345', // invalid phone number
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-08-01'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8603,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: expMember3Id,
+      package: 'monthly',
+      startDate: '2026-08-01',
+      expiryDate: '2026-09-01',
+      status: 'active',
+      createdAt: new Date('2026-08-01'),
+    });
+
+    // Test 1: Preview Endpoint
+    console.log('  -> Testing POST /api/reminders/expired/preview...');
+    const previewRes = await fetch(`${baseUrl}/api/reminders/expired/preview`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ date: '2026-10-01' }),
+    });
+    if (previewRes.status !== 200) {
+      throw new Error(`Expected HTTP 200 for preview endpoint, got: ${previewRes.status}`);
+    }
+    const previewData = await previewRes.json();
+
+    const p1 = previewData.members.find((m: any) => m.memberId === expMember1Id);
+    const p2 = previewData.members.find((m: any) => m.memberId === expMember2Id);
+    const p3 = previewData.members.find((m: any) => m.memberId === expMember3Id);
+
+    if (!p1 || p1.status !== 'eligible') {
+      throw new Error(`Member 9601 expected eligible, got: ${JSON.stringify(p1)}`);
+    }
+    if (!p2 || p2.status !== 'already_reminded') {
+      throw new Error(`Member 9602 expected already_reminded, got: ${JSON.stringify(p2)}`);
+    }
+    if (!p3 || p3.status !== 'invalid_phone') {
+      throw new Error(`Member 9603 expected invalid_phone, got: ${JSON.stringify(p3)}`);
+    }
+    console.log(`  -> PASSED: Preview correctly identified Eligible (${previewData.eligible}), Already Reminded (${previewData.alreadyReminded}), Invalid Phone (${previewData.invalidPhone}).`);
+
+    // Test 2: Bulk Send to these members
+    console.log('  -> Testing POST /api/reminders/expired/send (first dispatch)...');
+    const sendRes1 = await fetch(`${baseUrl}/api/reminders/expired/send`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        date: '2026-10-01',
+        memberIds: [expMember1Id, expMember2Id, expMember3Id],
+      }),
+    });
+    const sendData1 = await sendRes1.json();
+    if (sendRes1.status !== 200 || !sendData1.success) {
+      throw new Error(`Expected successful bulk send, got: ${JSON.stringify(sendData1)}`);
+    }
+
+    if (sendData1.sent !== 1) {
+      throw new Error(`Expected exactly 1 sent (eligible member 9601), got: ${sendData1.sent}`);
+    }
+    if (sendData1.skippedAlreadySent < 1) {
+      throw new Error(`Expected at least 1 skippedAlreadySent (member 9602), got: ${sendData1.skippedAlreadySent}`);
+    }
+    if (sendData1.invalidPhone !== 1) {
+      throw new Error(`Expected 1 invalidPhone (member 9603), got: ${sendData1.invalidPhone}`);
+    }
+    console.log(`  -> PASSED: First bulk send: Sent=${sendData1.sent}, AlreadyRemindedSkipped=${sendData1.skippedAlreadySent}, InvalidPhone=${sendData1.invalidPhone}.`);
+
+    // Test 3: Repeat Send Immediately — Member 9601 must now be skipped as already reminded!
+    console.log('  -> Testing repeat bulk send immediately (deduplication check)...');
+    const sendRes2 = await fetch(`${baseUrl}/api/reminders/expired/send`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        date: '2026-10-01',
+        memberIds: [expMember1Id, expMember2Id, expMember3Id],
+      }),
+    });
+    const sendData2 = await sendRes2.json();
+    if (sendData2.sent !== 0) {
+      throw new Error(`Expected 0 sent on repeat send (member 9601 already sent), got: ${sendData2.sent}`);
+    }
+    if (sendData2.skippedAlreadySent < 2) {
+      throw new Error(`Expected both 9601 and 9602 skipped on repeat, got: ${sendData2.skippedAlreadySent}`);
+    }
+    console.log(`  -> PASSED: Deduplication prevented duplicate SMS! Repeated send resulted in 0 duplicates, skippedAlreadySent=${sendData2.skippedAlreadySent}.`);
+
+    // Test 4: Safe Retry Rule — failed SMS attempts are not treated as delivered and can retry
+    console.log('  -> Testing safe retry for failed SMS attempt...');
+    const expMember4Id = 9604;
+    await db.collection('members').insertOne({
+      id: expMember4Id,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberNumber: 'TF-9604',
+      fullName: 'Retry Test Member',
+      phone: '+94771239604',
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-08-01'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8604,
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: expMember4Id,
+      package: 'monthly',
+      startDate: '2026-08-01',
+      expiryDate: '2026-09-01',
+      status: 'active',
+      createdAt: new Date('2026-08-01'),
+    });
+    // Insert a failed reminder attempt (e.g. gateway error previously)
+    await db.collection('membershipReminders').insertOne({
+      id: 7604,
+      reminderKey: 'biz_1:9604:8604:overdue:2026-10-01',
+      businessId: 'biz_1',
+      gymId: 1,
+      memberId: expMember4Id,
+      memberName: 'Retry Test Member',
+      memberPhone: '+94771239604',
+      membershipId: 8604,
+      reminderType: 'overdue',
+      scheduledDate: '2026-10-01',
+      dueDate: '2026-09-01',
+      status: 'failed',
+      attemptCount: 1,
+      errorMessage: 'Temporary network failure',
+      createdAt: new Date('2026-10-01'),
+    });
+
+    // Attempting bulk send for member 9604 should safely retry!
+    const retrySendRes = await fetch(`${baseUrl}/api/reminders/expired/send`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        date: '2026-10-01',
+        memberIds: [expMember4Id],
+      }),
+    });
+    const retrySendData = await retrySendRes.json();
+    if (retrySendData.sent !== 1) {
+      throw new Error(`Expected failed reminder to safely retry and send, got: ${JSON.stringify(retrySendData)}`);
+    }
+    console.log('  -> PASSED: Failed SMS attempt was safely retried and successfully accepted by gateway.');
+
+    // Test 5: Tenant Isolation Check — biz_1 reminder history must not affect biz_2
+    console.log('  -> Testing tenant isolation: biz_1 reminder history does not affect biz_2...');
+    const expMemberBiz2Id = 9605;
+    await db.collection('members').insertOne({
+      id: expMemberBiz2Id,
+      businessId: 'biz_2',
+      gymId: 2,
+      memberNumber: 'TF-9605',
+      fullName: 'Biz 2 Member',
+      phone: '+94771239601', // same phone number as biz_1 member
+      status: 'active',
+      memberType: 'individual',
+      createdAt: new Date('2026-08-01'),
+    });
+    await db.collection('memberships').insertOne({
+      id: 8605,
+      businessId: 'biz_2',
+      gymId: 2,
+      memberId: expMemberBiz2Id,
+      package: 'monthly',
+      startDate: '2026-08-01',
+      expiryDate: '2026-09-01',
+      status: 'active',
+      createdAt: new Date('2026-08-01'),
+    });
+    const previewBiz2 = await ReminderService.previewExpiredReminders('biz_2', '2026-10-01');
+    const pBiz2 = previewBiz2.members.find((m) => m.memberId === expMemberBiz2Id);
+    if (!pBiz2 || pBiz2.status !== 'eligible') {
+      throw new Error(`Tenant isolation violation: biz_2 member should be eligible despite biz_1 reminder, got: ${JSON.stringify(pBiz2)}`);
+    }
+    console.log('  -> PASSED: Strict tenant isolation maintained — biz_1 reminder history did not affect biz_2.');
 
     console.log('\n================================================================');
     console.log('ALL MEMBERSHIP RENEWAL SMS TEST SCENARIOS PASSED WITH 100% SUCCESS!');

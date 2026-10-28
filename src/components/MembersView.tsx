@@ -16,8 +16,11 @@ import {
   XCircle,
   Filter,
   Trash2,
+  Send,
+  Clock,
 } from 'lucide-react';
 import { Member } from '../types.ts';
+import { BulkExpiredRemindersModal } from './BulkExpiredRemindersModal.tsx';
 
 interface MembersViewProps {
   members: Member[];
@@ -54,6 +57,8 @@ export const MembersView: React.FC<MembersViewProps> = ({
   searchQuery,
   onSearchChange,
 }) => {
+  const [showBulkExpiredModal, setShowBulkExpiredModal] = useState<boolean>(false);
+
   const filterTabs = [
     { id: 'all', label: 'All Members' },
     { id: 'active', label: '🟢 Active' },
@@ -112,6 +117,16 @@ export const MembersView: React.FC<MembersViewProps> = ({
             className="p-3 rounded-2xl bg-[#121212] hover:bg-white/5 border border-white/5 text-gray-400 hover:text-white transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#FACC15]' : ''}`} />
+          </button>
+
+          <button
+            id="btn-bulk-expired-sms"
+            onClick={() => setShowBulkExpiredModal(true)}
+            title="Bulk Expired Reminders SMS"
+            className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-[#121212] hover:bg-white/5 border border-white/10 text-gray-200 text-xs sm:text-sm font-black uppercase tracking-wider transition-all active:scale-[0.98]"
+          >
+            <Clock className="w-4 h-4 text-[#FACC15]" />
+            <span className="hidden sm:inline">Expired SMS</span>
           </button>
 
           <button
@@ -361,6 +376,13 @@ export const MembersView: React.FC<MembersViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Bulk Expired Reminders Modal */}
+      <BulkExpiredRemindersModal
+        isOpen={showBulkExpiredModal}
+        onClose={() => setShowBulkExpiredModal(false)}
+        onSuccess={onRefresh}
+      />
     </div>
   );
 };

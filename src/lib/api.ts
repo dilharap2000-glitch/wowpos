@@ -346,6 +346,18 @@ export const api = {
       body: JSON.stringify(data || {}),
     }),
 
+  previewExpiredReminders: (data?: { date?: string }) =>
+    request<import('../types.ts').ExpiredReminderPreviewResult>('/api/reminders/expired/preview', {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+
+  sendBulkExpiredReminders: (data?: { date?: string; memberIds?: number[] }) =>
+    request<import('../types.ts').ExpiredReminderBulkSendResult>('/api/reminders/expired/send', {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
+
   // Super Admin
   getSuperAdminDashboard: () => request<any>('/api/superadmin/dashboard'),
   getSuperAdminGyms: () => request<any[]>('/api/superadmin/gyms'),

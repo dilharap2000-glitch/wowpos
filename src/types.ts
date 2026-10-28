@@ -389,3 +389,45 @@ export interface MembershipReminder {
   createdAt?: string | Date;
   updatedAt?: string | Date;
 }
+
+export interface ExpiredReminderPreviewItem {
+  memberId: number;
+  memberNumber: string;
+  fullName: string;
+  phone: string;
+  package: string;
+  expiryDate: string;
+  daysOverdue: number;
+  status: 'eligible' | 'already_reminded' | 'invalid_phone';
+  reason: string;
+  lastReminderDate?: string;
+  lastReminderStatus?: string;
+}
+
+export interface ExpiredReminderPreviewResult {
+  totalExpired: number;
+  alreadyReminded: number;
+  eligible: number;
+  invalidPhone: number;
+  members: ExpiredReminderPreviewItem[];
+}
+
+export interface ExpiredReminderBulkSendResult {
+  success: boolean;
+  totalExpired: number;
+  sent: number;
+  skippedAlreadySent: number;
+  failed: number;
+  invalidPhone: number;
+  skippedRenewed: number;
+  skippedPartner: number;
+  results: Array<{
+    memberId: number;
+    memberName: string;
+    phone: string;
+    action: 'sent' | 'skipped_already_sent' | 'skipped_duplicate' | 'skipped_renewed' | 'skipped_partner' | 'invalid_phone' | 'failed';
+    status?: string;
+    campaignId?: string | null;
+    error?: string;
+  }>;
+}

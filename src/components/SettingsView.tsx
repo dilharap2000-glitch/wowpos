@@ -39,6 +39,7 @@ import { api } from '../lib/api.ts';
 import { SmsLog } from '../types.ts';
 import { useBusiness } from '../context/BusinessContext.tsx';
 import { PAYMENT_METHODS, calculatePaymentFee, runFeeVerificationTests } from '../lib/payment-fee.ts';
+import { BulkExpiredRemindersModal } from './BulkExpiredRemindersModal.tsx';
 
 export const SettingsView: React.FC = () => {
   const { business, updateBusiness, loading: businessLoading } = useBusiness();
@@ -115,6 +116,7 @@ export const SettingsView: React.FC = () => {
   const [smsLogsView, setSmsLogsView] = useState<'reminders' | 'dispatches'>('reminders');
   const [reminderLogs, setReminderLogs] = useState<any[]>([]);
   const [loadingReminderLogs, setLoadingReminderLogs] = useState<boolean>(false);
+  const [showBulkExpiredModal, setShowBulkExpiredModal] = useState<boolean>(false);
 
   // New Staff Modal
   const [showStaffModal, setShowStaffModal] = useState(false);
@@ -2206,19 +2208,35 @@ export const SettingsView: React.FC = () => {
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={handleTriggerReminders}
-                disabled={runningReminders || !smsActive}
-                className={`w-full py-2.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
-                  runningReminders || !smsActive
-                    ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
-                    : 'bg-white/10 hover:bg-white/20 text-white border border-white/10 active:scale-95'
-                }`}
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${runningReminders ? 'animate-spin' : ''}`} />
-                {runningReminders ? 'Evaluating Reminders...' : 'RUN REMINDER CHECK NOW'}
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleTriggerReminders}
+                  disabled={runningReminders || !smsActive}
+                  className={`py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+                    runningReminders || !smsActive
+                      ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                      : 'bg-white/10 hover:bg-white/20 text-white border border-white/10 active:scale-95'
+                  }`}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${runningReminders ? 'animate-spin' : ''}`} />
+                  {runningReminders ? 'Evaluating...' : 'RUN SCHEDULE CHECK'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowBulkExpiredModal(true)}
+                  disabled={!smsActive}
+                  className={`py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+                    !smsActive
+                      ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                      : 'bg-[#FACC15] hover:bg-yellow-400 text-black shadow-md shadow-[#FACC15]/20 active:scale-95'
+                  }`}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  BULK EXPIRED REMINDERS
+                </button>
+              </div>
 
               {remindersRunResult && (
                 <div className="p-3 rounded-xl bg-black/60 border border-white/10 text-[11px] space-y-1">
@@ -2590,6 +2608,16 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Bulk Expired Reminders Preview & Send Modal */}
+      <BulkExpiredRemindersModal
+        isOpen={showBulkExpiredModal}
+        onClose={() => setShowBulkExpiredModal(false)}
+        onSuccess={() => {
+          loadReminderLogs();
+          loadSmsLogs();
+        }}
+      />
     </div>
   );
 };
